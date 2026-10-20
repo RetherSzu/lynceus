@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Build toutes les cibles
+        run: |
+          mkdir -p dist
+          GOOS=windows GOARCH=amd64 go build -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o dist/lynceus-windows-x64.exe ./cmd/dfirflow
+          GOOS=linux   GOARCH=amd64 go build -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o dist/lynceus-linux-x64 ./cmd/dfirflow
+          GOOS=linux   GOARCH=arm64 go build -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o dist/lynceus-linux-arm64 ./cmd/dfirflow
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
