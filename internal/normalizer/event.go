@@ -12,11 +12,11 @@ type Event struct {
 	TimestampType string    `json:"timestamp_type"` // Voir constantes TS*
 
 	// --- Origine de l'événement ---
-	Source   string `json:"source"`             // Voir constantes Source*
-	Provider string `json:"provider,omitempty"` // Fournisseur EVTX (ex. Microsoft-Windows-Security-Auditing)
-	EventID  int    `json:"event_id,omitempty"` // Identifiant EVTX (ex. 4688)
-	Host     string `json:"host"`
-	User     string `json:"user,omitempty"`
+	Source    string `json:"source"`             // Voir constantes Source*
+	Provider  string `json:"provider,omitempty"` // Fournisseur EVTX (ex. Microsoft-Windows-Security-Auditing)
+	EventID   int    `json:"event_id,omitempty"` // Identifiant EVTX (ex. 4688)
+	Host      string `json:"host"`
+	User      string `json:"user,omitempty"`
 	EventType string `json:"event_type"` // Catégorie normalisée (process_creation, logon, file_create, persistence…)
 
 	// --- Processus ---
