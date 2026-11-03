@@ -6,6 +6,9 @@
 
 **Status**: Draft
 
+**Amendement 2026-11-03**: l'option outil de `import` est `--tool` (et non `--from`, réservé aux
+bornes de `timeline`).
+
 **Input**: User description: "Fondation de la CLI DFIRFlow : grammaire des sous-commandes. Le cas est
 toujours désigné par --case. Commandes : `case init <ID> --host --analyst [--dir]`, `case verify --case`,
 `collect --case --target`, `ingest --case [chemins…]`, `import --case --from <outil> <chemin>`,
@@ -62,8 +65,8 @@ d'erreur sur la sortie d'erreur, la sortie standard vide et le code de sortie d'
    message indique que `--case` est obligatoire pour `detect` et le code de sortie est 2.
 2. **Given** le binaire, **When** l'analyste lance `dfirflow analyze`, **Then** le message indique
    que la commande est inconnue, renvoie vers `dfirflow --help`, et le code de sortie est 2.
-3. **Given** le binaire, **When** l'analyste lance `dfirflow import --case ./cases/C1 --from foo ./x`,
-   **Then** le message liste les valeurs acceptées pour `--from` et le code de sortie est 2.
+3. **Given** le binaire, **When** l'analyste lance `dfirflow import --case ./cases/C1 --tool foo ./x`,
+   **Then** le message liste les valeurs acceptées pour `--tool` et le code de sortie est 2.
 4. **Given** le binaire, **When** l'analyste lance `dfirflow report --case ./cases/C1 --format pdf`,
    **Then** le message liste les formats acceptés et le code de sortie est 2.
 5. **Given** le binaire, **When** l'analyste lance `dfirflow case init ../evil --host H --analyst A`,
@@ -158,7 +161,7 @@ implémentées, et vérifier codes de sortie et séparation sortie standard / so
 - **FR-007**: `case verify` MUST exiger `--case`.
 - **FR-008**: `collect` MUST exiger `--case` et `--target` (fichier ou dossier source des preuves).
 - **FR-009**: `ingest` MUST exiger `--case` et accepter zéro ou plusieurs chemins positionnels.
-- **FR-010**: `import` MUST exiger `--case`, `--from` et exactement un chemin positionnel ; `--from`
+- **FR-010**: `import` MUST exiger `--case`, `--tool` et exactement un chemin positionnel ; `--tool`
   MUST être l'une des valeurs `kape`, `orc`, `eztools`, `hayabusa`, `plaso`, `volatility`.
 - **FR-011**: `timeline` MUST exiger `--case` et accepter `--from` et `--to` (date-heure ISO 8601,
   interprétée en UTC si aucun fuseau n'est donné) et `--source` (une ou plusieurs valeurs parmi
@@ -235,7 +238,7 @@ implémentées, et vérifier codes de sortie et séparation sortie standard / so
 - La validation se limite à la syntaxe : l'existence du cas, de `--target`, des chemins ou des
   règles est vérifiée par les specs fonctionnelles correspondantes (code 1 en cas d'échec).
 - Le dossier racine des cas par défaut est `./cases`, conformément à `docs/Archi.md` §5.
-- La liste des valeurs de `--from` (import) et `--source` (timeline) suit `docs/etude-existant.md`
+- La liste des valeurs de `--tool` (import) et `--source` (timeline) suit `docs/etude-existant.md`
   §9.1 et les constantes de source du modèle `Event` ; elle évoluera avec les specs d'import et de
   parsing.
 - Le code de sortie actuel (2 pour toute erreur) est remplacé par le contrat FR-020 ; les erreurs
