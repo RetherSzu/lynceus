@@ -44,6 +44,7 @@ Argument positionnel de `case init` : `^[A-Za-z0-9_-]{1,64}$`.
 | 1 | Échec d'exécution | Erreur à l'exécution d'une commande fonctionnelle |
 | 2 | Erreur d'usage | Commande inconnue, option manquante/invalide/répétée, argument en trop |
 | 3 | Non implémenté | Commande valide dont la spec fonctionnelle n'est pas livrée |
+| 4 | Échec d'intégrité | `case verify` détecte une preuve `MODIFIED`, `MISSING` ou `UNTRACKED` (spec 002) |
 | 130 | Interruption | Ctrl+C |
 
 ## Transitions

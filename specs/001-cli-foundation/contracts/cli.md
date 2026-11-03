@@ -62,4 +62,5 @@ Listes : pas de doublon, pas d'élément vide.
 | 1 | échec d'exécution |
 | 2 | erreur d'usage |
 | 3 | fonctionnalité non implémentée |
+| 4 | échec d'intégrité des preuves (`case verify`, spec 002) |
 | 130 | interruption utilisateur |

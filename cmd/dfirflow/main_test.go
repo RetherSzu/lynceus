@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -57,6 +58,7 @@ func TestExitCode(t *testing.T) {
 		{bg, &cmdError{cmd: "detect", err: &usageError{msg: "bad"}}, 2},
 		{bg, errNotImplemented, 3},
 		{bg, &cmdError{cmd: "detect", err: errNotImplemented}, 3},
+		{bg, &cmdError{cmd: "case verify", err: errIntegrity}, 4},
 		{cancelled, context.Canceled, 130},
 		{bg, errors.New("boom"), 1},
 	}
@@ -182,8 +184,6 @@ func TestNotImplemented(t *testing.T) {
 	c := filepath.Join(dir, "cases", "CASE-001")
 	ev := filepath.Join(dir, "evidence")
 	tests := [][]string{
-		{"case", "init", "CASE-001", "--host", "WIN-CLIENT01", "--analyst", "dfir-team", "--dir", filepath.Join(dir, "cases")},
-		{"case", "verify", "--case", c},
 		{"collect", "--case", c, "--target", ev},
 		{"ingest", "--case", c},
 		{"import", "--case", c, "--tool", "hayabusa", filepath.Join(dir, "out.jsonl")},
@@ -223,5 +223,64 @@ func TestScriptUsage(t *testing.T) {
 	cancel()
 	if code, out, errOut := invoke(cancelled, "investigate", "--case", "C", "--target", "E"); code != 130 || out != "" || errOut != "" {
 		t.Errorf("interrupted: code=%d stdout=%q stderr=%q, want 130 and no output", code, out, errOut)
+	}
+}
+
+func readLog(t *testing.T, caseDir string) []map[string]interface{} {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(caseDir, "case.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []map[string]interface{}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var e map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("invalid journal line %q: %v", line, err)
+		}
+		entries = append(entries, e)
+	}
+	return entries
+}
+
+func TestCaseInit(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cases")
+	want := filepath.Join(dir, "CASE-001")
+	code, out, errOut := invoke(context.Background(), "case", "init", "CASE-001", "--host", "WIN-CLIENT01", "--analyst", "dfir-team", "--dir", dir)
+	if code != 0 || out != want+"\n" || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if code, _, errOut := invoke(context.Background(), "case", "init", "CASE-001", "--host", "H", "--analyst", "A", "--dir", dir); code != 1 || !strings.HasPrefix(errOut, "dfirflow: case init: ") {
+		t.Errorf("existing case: code=%d stderr=%q", code, errOut)
+	}
+	log := readLog(t, want)
+	if len(log) != 1 || log[0]["command"] != "case init" || log[0]["exit_code"] != 0.0 {
+		t.Errorf("journal = %v", log)
+	}
+}
+
+func TestCaseVerify(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "cases")
+	c := filepath.Join(dir, "CASE-001")
+	invoke(ctx, "case", "init", "CASE-001", "--host", "H", "--analyst", "A", "--dir", dir)
+
+	code, out, _ := invoke(ctx, "case", "verify", "--case", c)
+	if code != 0 || out != "0 evidence files: 0 OK, 0 MODIFIED, 0 MISSING, 0 UNTRACKED\n" {
+		t.Fatalf("intact case: code=%d stdout=%q", code, out)
+	}
+	if err := os.WriteFile(filepath.Join(c, "evidence", "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := invoke(ctx, "case", "verify", "--case", c)
+	if code != 4 || !strings.Contains(out, "UNTRACKED  notes.txt") || errOut != "dfirflow: case verify: integrity check failed\n" {
+		t.Errorf("altered case: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if code, _, _ := invoke(ctx, "case", "verify", "--case", filepath.Join(dir, "nope")); code != 1 {
+		t.Errorf("invalid case: code=%d, want 1", code)
+	}
+	log := readLog(t, c)
+	if len(log) != 3 || log[1]["exit_code"] != 0.0 || log[2]["exit_code"] != 4.0 || log[2]["summary"].(map[string]interface{})["UNTRACKED"] != 1.0 {
+		t.Errorf("journal = %v", log)
 	}
 }

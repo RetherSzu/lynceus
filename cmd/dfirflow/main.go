@@ -12,7 +12,10 @@ import (
 
 var version = "dev"
 
-var errNotImplemented = errors.New("not implemented yet")
+var (
+	errNotImplemented = errors.New("not implemented yet")
+	errIntegrity      = errors.New("integrity check failed")
+)
 
 // usageError reports a malformed command line (exit code 2).
 type usageError struct{ msg string }
@@ -56,6 +59,8 @@ func exitCode(ctx context.Context, err error) int {
 		return 2
 	case errors.Is(err, errNotImplemented):
 		return 3
+	case errors.Is(err, errIntegrity):
+		return 4
 	default:
 		return 1
 	}
@@ -119,6 +124,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil || o == nil {
 		return wrap(c.name, err)
 	}
+	o.argv, o.stdout = rest, stdout
 	if err := ctx.Err(); err != nil {
 		return err
 	}

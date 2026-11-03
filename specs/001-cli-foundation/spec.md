@@ -189,7 +189,7 @@ implémentées, et vérifier codes de sortie et séparation sortie standard / so
   écriture sur le disque.
 - **FR-020**: La CLI MUST utiliser les codes de sortie suivants :
   `0` succès ; `1` échec d'exécution ; `2` erreur d'usage ; `3` fonctionnalité non implémentée ;
-  `130` interruption par l'utilisateur.
+  `4` échec d'intégrité des preuves (ajouté par la spec 002) ; `130` interruption par l'utilisateur.
 - **FR-021**: Tant que la spec fonctionnelle d'une commande n'est pas livrée, cette commande, une
   fois ses arguments validés, MUST afficher `dfirflow: <commande>: not implemented yet` sur la sortie
   d'erreur, ne rien écrire sur le disque et sortir avec le code 3.
