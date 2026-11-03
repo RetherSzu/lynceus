@@ -24,6 +24,19 @@ jobs:
       - name: Tests
         run: go test ./... -race -cover
 
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      # sans -race : il exige cgo sous Windows ; gofmt et vet tournent déjà dans `test`
+      - name: Tests
+        run: go test ./... -cover
+
   build:
     runs-on: ubuntu-latest
     needs: test
