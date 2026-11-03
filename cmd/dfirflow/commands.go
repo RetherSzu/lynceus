@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	casefile "DFIRFlow/internal/case"
 )
 
 // opts holds the parsed options of one command invocation.
@@ -16,6 +18,8 @@ type opts struct {
 	tool, from, to, source, rules       onceString
 	format                              onceString
 	positionals                         []string
+	argv                                []string // command arguments, for the case journal
+	stdout                              io.Writer
 }
 
 type option struct {
@@ -60,9 +64,11 @@ func init() {
 				{"dir", "<path>", "parent directory of cases", false, func(o *opts) *onceString { return &o.dir }},
 			},
 			check:   checkCaseID,
+			exec:    caseInit,
 			example: "dfirflow case init CASE-001 --host WIN-CLIENT01 --analyst dfir-team"},
 		{name: "case verify", summary: "Recompute SHA-256 hashes and check evidence integrity",
 			options: []option{optCase},
+			exec:    caseVerify,
 			example: "dfirflow case verify --case ./cases/CASE-001"},
 		{name: "collect", summary: "Copy and hash evidence into the case",
 			options: []option{optCase, optTarget},
@@ -286,4 +292,61 @@ func parseTime(name string, v onceString) (time.Time, error) {
 		}
 	}
 	return time.Time{}, &usageError{msg: fmt.Sprintf("invalid --%s %q: expected RFC 3339 date-time, e.g. 2026-11-02T09:00:00Z", name, v.value)}
+}
+
+func caseInit(ctx context.Context, o *opts) (err error) {
+	started := time.Now()
+	c, err := casefile.Create(o.dir.value, o.positionals[0], o.host.value, o.analyst.value, version, started)
+	if err != nil {
+		return err
+	}
+	defer func() { err = logOperation(ctx, c, "case init", o, started, err, nil) }()
+	_, err = fmt.Fprintln(o.stdout, c.BaseDir)
+	return err
+}
+
+func caseVerify(ctx context.Context, o *opts) (err error) {
+	started := time.Now()
+	c, err := casefile.Open(o.caseDir.value)
+	if err != nil {
+		return err
+	}
+	counts := map[string]int{casefile.StatusOK: 0, casefile.StatusModified: 0, casefile.StatusMissing: 0, casefile.StatusUntracked: 0}
+	defer func() { err = logOperation(ctx, c, "case verify", o, started, err, counts) }()
+	results, err := c.Verify(ctx)
+	if err != nil {
+		return err
+	}
+	for _, r := range results {
+		counts[r.Status]++
+		line := fmt.Sprintf("%-10s %s", r.Status, r.File)
+		switch r.Status {
+		case casefile.StatusOK:
+			line += "  sha256=" + r.Expected
+		case casefile.StatusModified:
+			line += "  expected=" + r.Expected + " actual=" + r.Actual
+		case casefile.StatusMissing:
+			line += "  expected=" + r.Expected
+		}
+		fmt.Fprintln(o.stdout, line)
+	}
+	fmt.Fprintf(o.stdout, "%d evidence files: %d OK, %d MODIFIED, %d MISSING, %d UNTRACKED\n", len(results),
+		counts[casefile.StatusOK], counts[casefile.StatusModified], counts[casefile.StatusMissing], counts[casefile.StatusUntracked])
+	if counts[casefile.StatusOK] != len(results) {
+		return errIntegrity
+	}
+	return nil
+}
+
+// logOperation journalise la commande dans le cas ; un échec d'écriture du
+// journal fait échouer une commande qui avait réussi.
+func logOperation(ctx context.Context, c *casefile.Case, name string, o *opts, started time.Time, err error, summary interface{}) error {
+	lerr := c.Log(casefile.LogEntry{
+		Command: name, Args: o.argv, StartedAt: started, FinishedAt: time.Now(),
+		ToolVersion: version, ExitCode: exitCode(ctx, err), Summary: summary,
+	})
+	if err == nil && lerr != nil {
+		return fmt.Errorf("writing case journal: %w", lerr)
+	}
+	return err
 }
