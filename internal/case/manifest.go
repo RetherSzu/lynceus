@@ -105,7 +105,9 @@ func hashFile(wrap func(io.Reader) io.Reader, path string) (string, int64, error
 // cleanRel normalise un chemin relatif à evidence/ et refuse ceux qui en sortent.
 func cleanRel(rel string) (string, error) {
 	clean := filepath.Clean(rel)
+	// Sous Windows, `\abs` n'est pas absolu (pas de volume) mais part de la racine du lecteur.
 	if rel == "" || clean == "." || filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" ||
+		strings.HasPrefix(clean, string(filepath.Separator)) ||
 		clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid evidence path %q: must stay inside evidence/", rel)
 	}
