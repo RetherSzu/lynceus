@@ -289,3 +289,18 @@ type Parser interface {
   SHA-256(`rule_id` \x00 `rule_version` \x00 `uid` triés séparés par \x00).
 - **Amendement CLI dans la 003 (déroge à D1)** : `timeline --source` accepte `evtx`, `mft`,
   `usnjrnl`, `registry`, `prefetch`, `memory` (FR-026).
+
+## Compléments validés à l'implémentation (2026-11-08)
+
+- **Validation** : règles en anglais (cohérent avec la CLI) ; `-` refusé dans `domain`/`name`,
+  `S-1-0-0` seulement dans `sid` ; lettre de lecteur refusée dans `source_file` ;
+  `NormalizeHost` retire les espaces et `host` avec espace est refusé ; une source inconnue ne
+  déclenche pas en plus les règles `channel`/`provider`/`event_id`.
+- **Lecture JSONL** : refus de la dernière ligne sans `\n` et des lignes vides ; `schema_version`
+  contrôlé avant le décodage strict ; tri sur l'horodatage tronqué à la µs (ordre identique avant
+  et après écriture) ; l'encodeur refuse un événement invalide sans rien écrire.
+- **`missing`** : une anomalie par enregistrement manquant (SC-005). Le regroupement des
+  `missing` consécutifs se fait **à l'affichage uniquement** (spec `report`), jamais dans les
+  données.
+- **Déduplication** : `Validating` ne fait que valider. La détection d'une preuve déjà ingérée,
+  ou d'un `uid` en double, relève de la spec 005 (`ingest`).
