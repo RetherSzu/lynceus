@@ -1,0 +1,2 @@
+# Fichiers de référence comparés octet par octet : jamais de conversion en CRLF
+*.jsonl text eol=lf

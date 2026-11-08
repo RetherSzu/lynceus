@@ -40,7 +40,7 @@ type command struct {
 var (
 	caseIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	importTools   = []string{"kape", "orc", "eztools", "hayabusa", "plaso", "volatility"}
-	sources       = []string{"evtx", "mft", "usnjrnl", "registry", "prefetch", "powershell", "defender", "memory"}
+	sources       = []string{"evtx", "mft", "usnjrnl", "registry", "prefetch", "memory"}
 	formats       = []string{"html", "sqlite", "jsonl"}
 )
 
