@@ -69,6 +69,44 @@ func SortEvents(evs []Event) {
 	})
 }
 
+type detectionLine struct {
+	SchemaVersion int `json:"schema_version"`
+	Detection
+}
+
+// Detection écrit une détection valide ; une détection invalide n'est pas écrite.
+func (e *Encoder) Detection(d Detection) error {
+	if vs := d.Validate(); len(vs) > 0 {
+		return fmt.Errorf("invalid detection id=%s: %s", d.ID, joinViolations(vs))
+	}
+	return e.enc.Encode(detectionLine{SchemaVersion, d})
+}
+
+// ReadDetections lit un fichier JSONL de détections avec les mêmes règles que ReadEvents.
+func ReadDetections(r io.Reader, fn func(Detection) error) error {
+	return readLines(r, func(b []byte) error {
+		var l detectionLine
+		if err := decodeStrict(b, &l); err != nil {
+			return err
+		}
+		if vs := l.Detection.Validate(); len(vs) > 0 {
+			return fmt.Errorf("id=%s: %s", l.ID, joinViolations(vs))
+		}
+		return callback{fn(l.Detection)}
+	})
+}
+
+// SortDetections trie dans l'ordre canonique : timestamp (tronqué à la µs), puis id.
+func SortDetections(ds []Detection) {
+	sort.Slice(ds, func(i, j int) bool {
+		ta, tb := ds[i].Timestamp.Truncate(time.Microsecond), ds[j].Timestamp.Truncate(time.Microsecond)
+		if !ta.Equal(tb) {
+			return ta.Before(tb)
+		}
+		return ds[i].ID < ds[j].ID
+	})
+}
+
 // callback distingue l'erreur de l'appelant, renvoyée telle quelle, des
 // erreurs de format, préfixées du numéro de ligne.
 type callback struct{ err error }
