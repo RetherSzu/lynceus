@@ -74,15 +74,15 @@ Compatibilité `go 1.18` : pas de `slices`, `maps`, `cmp`, `min`.
 
 **Independent Test**: `go test ./internal/normalizer/ -run Version`.
 
-- [ ] T017 [US5] Écrire `TestUnsupportedVersion` dans internal/normalizer/jsonl_test.go : ligne `schema_version` 2 (et 0) ⇒ erreur contenant `line 1`, `schema_version 2` et `upgrade` ; idem pour `ReadDetections`
-- [ ] T018 [US5] Ajuster dans internal/normalizer/jsonl.go le message de version non prise en charge (`line N: unsupported schema_version N, upgrade dfirflow`) ; vérifier que specs/003-event-model/contracts/event-model.md porte l'historique avec la version 1 (spec 003) et la procédure FR-025
+- [x] T017 [US5] Écrire `TestUnsupportedVersion` dans internal/normalizer/jsonl_test.go : ligne `schema_version` 2 ⇒ erreur contenant `line 1`, `schema_version 2` et `upgrade` ; 0 et -1 ⇒ `re-ingest` (choix validé : consigne selon le sens) ; idem pour `ReadDetections`
+- [x] T018 [US5] Ajuster dans internal/normalizer/jsonl.go le message de version non prise en charge (`line N: unsupported schema_version N, upgrade dfirflow`, ou `re-ingest the case` si plus ancienne) ; vérifier que specs/003-event-model/contracts/event-model.md porte l'historique avec la version 1 (spec 003) et la procédure FR-025
 
 ---
 
 ## Phase 8: Amendement de la spec 001 (FR-026)
 
-- [ ] T019 Mettre à jour cmd/dfirflow/main_test.go : `--source powershell` et `--source defender` ⇒ code 2 ; `--source evtx,mft,usnjrnl,registry,prefetch,memory` ⇒ code 3 ; l'aide de `timeline` liste `evtx, mft, usnjrnl, registry, prefetch, memory`
-- [ ] T020 Retirer `powershell` et `defender` de `sources` dans cmd/dfirflow/commands.go ; reporter la liste dans specs/001-cli-foundation/spec.md (FR-011) et specs/001-cli-foundation/contracts/cli.md avec la mention « amendé par la spec 003 (FR-026) »
+- [x] T019 Mettre à jour cmd/dfirflow/main_test.go : `--source powershell` et `--source defender` ⇒ code 2 ; `--source evtx,mft,usnjrnl,registry,prefetch,memory` ⇒ code 3 ; l'aide de `timeline` liste `evtx, mft, usnjrnl, registry, prefetch, memory`
+- [x] T020 Retirer `powershell` et `defender` de `sources` dans cmd/dfirflow/commands.go ; reporter la liste dans specs/001-cli-foundation/spec.md (FR-011) et specs/001-cli-foundation/contracts/cli.md avec la mention « amendé par la spec 003 (FR-026) »
 
 ---
 

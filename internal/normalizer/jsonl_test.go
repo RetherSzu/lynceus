@@ -240,3 +240,24 @@ func TestReadEventsGarbage(t *testing.T) {
 		}
 	}
 }
+
+// TestUnsupportedVersion (US5) : la consigne dépend du sens de l'écart de version.
+func TestUnsupportedVersion(t *testing.T) {
+	readers := map[string]func(string) error{
+		"events": func(s string) error { return ReadEvents(strings.NewReader(s), func(Event) error { return nil }) },
+		"detections": func(s string) error {
+			return ReadDetections(strings.NewReader(s), func(Detection) error { return nil })
+		},
+	}
+	for name, read := range readers {
+		for v, hint := range map[int]string{2: "upgrade dfirflow", 0: "re-ingest the case", -1: "re-ingest the case"} {
+			err := read(`{"schema_version":` + strconv.Itoa(v) + "}\n")
+			want := []string{"line 1", "schema_version " + strconv.Itoa(v), hint}
+			for _, w := range want {
+				if err == nil || !strings.Contains(err.Error(), w) {
+					t.Errorf("%s v%d: err = %v, want it to contain %q", name, v, err, w)
+				}
+			}
+		}
+	}
+}

@@ -165,7 +165,7 @@ implémentées, et vérifier codes de sortie et séparation sortie standard / so
   MUST être l'une des valeurs `kape`, `orc`, `eztools`, `hayabusa`, `plaso`, `volatility`.
 - **FR-011**: `timeline` MUST exiger `--case` et accepter `--from` et `--to` (date-heure ISO 8601,
   interprétée en UTC si aucun fuseau n'est donné) et `--source` (une ou plusieurs valeurs parmi
-  `evtx`, `mft`, `usnjrnl`, `registry`, `prefetch`, `powershell`, `defender`, `memory`).
+  `evtx`, `mft`, `usnjrnl`, `registry`, `prefetch`, `memory`) — amendé par la spec 003 (FR-026).
 - **FR-012**: `detect` MUST exiger `--case` et accepter `--rules` (fichier ou dossier de règles).
 - **FR-013**: `correlate` MUST exiger `--case`.
 - **FR-014**: `report` MUST exiger `--case` et accepter `--format`, liste séparée par des virgules

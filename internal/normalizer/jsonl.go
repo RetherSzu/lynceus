@@ -170,8 +170,13 @@ func decodeStrict(b []byte, v interface{}) error {
 	if head.SchemaVersion == nil {
 		return errors.New("missing schema_version")
 	}
-	if *head.SchemaVersion != SchemaVersion {
-		return fmt.Errorf("unsupported schema_version %d", *head.SchemaVersion)
+	// La consigne dépend du sens : fichier plus récent que le binaire, ou
+	// ancien format à régénérer depuis evidence/ (D11).
+	switch v := *head.SchemaVersion; {
+	case v > SchemaVersion:
+		return fmt.Errorf("unsupported schema_version %d, upgrade dfirflow", v)
+	case v < SchemaVersion:
+		return fmt.Errorf("unsupported schema_version %d, re-ingest the case", v)
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()

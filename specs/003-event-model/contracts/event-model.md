@@ -88,6 +88,8 @@ Voir [data-model.md](../data-model.md) § `parser` et FR-014 à FR-016d. Anomali
 - **Additive** (champ facultatif, valeur de liste) : les versions antérieures restent lisibles.
 - **Cassante** (renommage, suppression, changement de sens ou de rendu) : les versions antérieures
   sont refusées avec l'invitation à réingérer le cas.
+- Messages du lecteur : version plus récente que le binaire ⇒ `line N: unsupported schema_version N,
+  upgrade dfirflow` ; version plus ancienne non lisible ⇒ `…, re-ingest the case`.
 - Gelés hors changement cassant justifié : formule du `uid`, rendu de `metadata`, écriture des
   horodatages.
 - Dans le même commit : ce contrat, le fichier de référence `testdata/events.v<N>.jsonl`, et

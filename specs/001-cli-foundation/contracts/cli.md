@@ -40,7 +40,7 @@ dfirflow <commande> -h | --help
 | `--case`, `--target`, `--dir`, `--rules`, chemins | chemin non vide |
 | `import --tool` | `kape`, `orc`, `eztools`, `hayabusa`, `plaso`, `volatility` |
 | `timeline --from`, `--to` | RFC 3339 (`2026-11-02T09:00:00Z`, `…+01:00`) ou sans fuseau (UTC) ; `--from` ≤ `--to` |
-| `timeline --source` | liste séparée par virgules parmi `evtx`, `mft`, `usnjrnl`, `registry`, `prefetch`, `powershell`, `defender`, `memory` |
+| `timeline --source` | liste séparée par virgules parmi `evtx`, `mft`, `usnjrnl`, `registry`, `prefetch`, `memory` (amendé par la spec 003, FR-026) |
 | `report --format` | liste séparée par virgules parmi `html`, `sqlite`, `jsonl` |
 
 Listes : pas de doublon, pas d'élément vide.
