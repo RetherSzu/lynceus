@@ -88,10 +88,10 @@ Compatibilité `go 1.18` : pas de `slices`, `maps`, `cmp`, `min`.
 
 ## Phase 9: Polish
 
-- [ ] T021 Vérifier au premier push que le job `test-windows` de .github/workflows/ci.yml (ajouté à l'analyse, sans `-race` qui exige cgo) est vert et que .gitattributes (`*.jsonl text eol=lf`, sinon Git extrait le fichier de référence en `\r\n` sous Windows) est respecté ; si les tests de la spec 002 échouent sous Windows au nettoyage des preuves en lecture seule, ajouter dans internal/case/case_test.go un `t.Cleanup` qui rétablit les droits d'écriture
-- [ ] T022 `gofmt -l .`, `go vet ./...`, `go test ./... -race -cover`, `GOOS=windows go build ./...`
-- [ ] T023 Dérouler specs/003-event-model/quickstart.md §1 à §4 (dont `sha256sum` stable sur deux exécutions et lecture `jq`)
-- [ ] T024 Passer de 📐 à ✅ les éléments livrés dans docs/architecture-actuelle.md et docs/dictionnaire-donnees.md (fichiers locaux, non commités)
+- [x] T021 Vérifier au premier push que le job `test-windows` de .github/workflows/ci.yml (ajouté à l'analyse, sans `-race` qui exige cgo) est vert et que .gitattributes (`*.jsonl text eol=lf`, sinon Git extrait le fichier de référence en `\r\n` sous Windows) est respecté ; si les tests de la spec 002 échouent sous Windows au nettoyage des preuves en lecture seule, ajouter dans internal/case/case_test.go un `t.Cleanup` qui rétablit les droits d'écriture
+- [x] T022 `gofmt -l .`, `go vet ./...`, `go test ./... -race -cover`, `GOOS=windows go build ./...`
+- [x] T023 Dérouler specs/003-event-model/quickstart.md §1 à §4 (dont `sha256sum` stable sur deux exécutions et lecture `jq`)
+- [x] T024 Passer de 📐 à ✅ les éléments livrés dans docs/architecture-actuelle.md et docs/dictionnaire-donnees.md (fichiers locaux, non commités)
 
 ## Dependencies & Execution Order
 

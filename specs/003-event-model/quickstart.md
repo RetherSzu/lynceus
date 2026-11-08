@@ -14,8 +14,8 @@ US3 (faux parseur, anomalies, annulation), US4 (détections), US5 (version non p
 ## 2. Déterminisme du fichier de référence (SC-001)
 
 ```bash
-go test ./internal/normalizer/ -run Golden -count=2
-sha256sum internal/normalizer/testdata/events.v1.jsonl   # identique sous Linux et Windows (jobs test et test-windows)
+for i in 1 2; do go test ./internal/normalizer/ -run Golden -count=1 -update && sha256sum internal/normalizer/testdata/events.v1.jsonl; done
+# deux régénérations, même empreinte et git diff vide ; Windows : TestGolden compare les octets (job test-windows)
 ```
 
 ## 3. Lisibilité par un outil tiers
