@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -184,9 +187,7 @@ func TestUsageErrors(t *testing.T) {
 func TestNotImplemented(t *testing.T) {
 	dir := t.TempDir()
 	c := filepath.Join(dir, "cases", "CASE-001")
-	ev := filepath.Join(dir, "evidence")
 	tests := [][]string{
-		{"collect", "--case", c, "--target", ev},
 		{"ingest", "--case", c},
 		{"import", "--case", c, "--tool", "hayabusa", filepath.Join(dir, "out.jsonl")},
 		{"timeline", "--case", c, "--from", "2026-11-01T00:00:00", "--to", "2026-11-02T00:00:00+01:00", "--source", "evtx,mft,usnjrnl,registry,prefetch,memory"},
@@ -204,12 +205,69 @@ func TestNotImplemented(t *testing.T) {
 			t.Errorf("%v: code=%d stdout=%q stderr=%q, want 3 and %q", args, code, out, errOut, want)
 		}
 	}
-	code, _, errOut := invoke(context.Background(), "investigate", "--case", c, "--target", ev)
-	if want := "dfirflow: investigate: collect: not implemented yet\n"; code != 3 || errOut != want {
-		t.Errorf("investigate: code=%d stderr=%q, want 3 and %q", code, errOut, want)
-	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("commands wrote to disk: %v", entries)
+	}
+
+	// investigate runs the real collect, then stops on the first missing step.
+	inv := t.TempDir()
+	cases := filepath.Join(inv, "cases")
+	invoke(context.Background(), "case", "init", "CASE-001", "--host", "H", "--analyst", "A", "--dir", cases)
+	target := filepath.Join(inv, "target")
+	writeEvidence(t, target, "Security.evtx", "s")
+	code, _, errOut := invoke(context.Background(), "investigate", "--case", filepath.Join(cases, "CASE-001"), "--target", target)
+	if want := "dfirflow: investigate: ingest: not implemented yet\n"; code != 3 || errOut != want {
+		t.Errorf("investigate: code=%d stderr=%q, want 3 and %q", code, errOut, want)
+	}
+}
+
+const evtxDir = "Windows/System32/winevt/Logs"
+
+// writeEvidence creates target/Windows/System32/winevt/Logs/name.
+func writeEvidence(t *testing.T, target, name, content string) string {
+	t.Helper()
+	p := filepath.Join(target, filepath.FromSlash(evtxDir), name)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func sha(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
+// newCollectCase creates a case and a target; it returns their paths.
+func newCollectCase(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	cases := filepath.Join(dir, "cases")
+	if code, _, errOut := invoke(context.Background(), "case", "init", "CASE-004", "--host", "H", "--analyst", "A", "--dir", cases); code != 0 {
+		t.Fatalf("case init: %s", errOut)
+	}
+	return filepath.Join(cases, "CASE-004"), filepath.Join(dir, "target")
+}
+
+func TestCollectCommand(t *testing.T) {
+	ctx := context.Background()
+	c, target := newCollectCase(t)
+	writeEvidence(t, target, "System.evtx", "system")
+	writeEvidence(t, target, "Security.evtx", "security")
+	code, out, errOut := invoke(ctx, "collect", "--case", c, "--target", target)
+	want := "COLLECTED  " + evtxDir + "/Security.evtx  sha256=" + sha("security") + "\n" +
+		"COLLECTED  " + evtxDir + "/System.evtx  sha256=" + sha("system") + "\n" +
+		"2 files: 2 COLLECTED, 0 ALREADY, 0 CONFLICT, 0 FAILED, 0 SKIPPED\n"
+	if code != 0 || out != want || errOut != "" {
+		t.Errorf("code=%d stdout=%q stderr=%q, want 0 and %q", code, out, errOut, want)
+	}
+	empty := t.TempDir()
+	code, _, errOut = invoke(ctx, "collect", "--case", c, "--target", empty)
+	if want := "dfirflow: collect: no artifact found under " + empty + "\n"; code != 1 || errOut != want {
+		t.Errorf("empty target: code=%d stderr=%q, want 1 and %q", code, errOut, want)
 	}
 }
 
@@ -285,4 +343,98 @@ func TestCaseVerify(t *testing.T) {
 	if len(log) != 3 || log[1]["exit_code"] != 0.0 || log[2]["exit_code"] != 4.0 || log[2]["summary"].(map[string]interface{})["UNTRACKED"] != 1.0 {
 		t.Errorf("journal = %v", log)
 	}
+}
+
+func TestCollectLog(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("chmod 0 does not deny reads here")
+	}
+	ctx := context.Background()
+	c, target := newCollectCase(t)
+	writeEvidence(t, target, "a.evtx", "a")
+	writeEvidence(t, target, "c.evtx", "c")
+	bad := writeEvidence(t, target, "b.evtx", "b")
+	os.Chmod(bad, 0)
+	defer os.Chmod(bad, 0o644)
+	code, _, errOut := invoke(ctx, "collect", "--case", c, "--target", target)
+	if code != 1 || errOut != "dfirflow: collect: collection incomplete\n" {
+		t.Fatalf("code=%d stderr=%q", code, errOut)
+	}
+	log := readLog(t, c)
+	last := log[len(log)-1]
+	sum, _ := last["summary"].(map[string]interface{})
+	abs, _ := filepath.Abs(target)
+	problems, _ := sum["problems"].([]interface{})
+	if last["command"] != "collect" || last["exit_code"] != 1.0 || sum["target"] != abs ||
+		sum["COLLECTED"] != 2.0 || sum["ALREADY"] != 0.0 || sum["CONFLICT"] != 0.0 || sum["FAILED"] != 1.0 || sum["SKIPPED"] != 0.0 || len(problems) != 1 {
+		t.Fatalf("journal entry = %v", last)
+	}
+	p := problems[0].(map[string]interface{})
+	if p["file"] != evtxDir+"/b.evtx" || p["status"] != "FAILED" || p["reason"] == "" {
+		t.Errorf("problem = %v", p)
+	}
+
+	c, target = newCollectCase(t)
+	writeEvidence(t, target, "a.evtx", "a")
+	if code, _, errOut := invoke(ctx, "collect", "--case", c, "--target", target); code != 0 {
+		t.Fatalf("second run: code=%d stderr=%q", code, errOut)
+	}
+	log = readLog(t, c)
+	last = log[len(log)-1]
+	if sum := last["summary"].(map[string]interface{}); last["exit_code"] != 0.0 || sum["problems"] != nil {
+		t.Errorf("clean run journal = %v", last)
+	}
+}
+
+func TestCollectRerun(t *testing.T) {
+	ctx := context.Background()
+	c, target := newCollectCase(t)
+	writeEvidence(t, target, "Security.evtx", "security")
+	invoke(ctx, "collect", "--case", c, "--target", target)
+	code, out, _ := invoke(ctx, "collect", "--case", c, "--target", target)
+	if want := "ALREADY    " + evtxDir + "/Security.evtx  sha256=" + sha("security") + "\n"; code != 0 || !strings.HasPrefix(out, want) {
+		t.Errorf("rerun: code=%d stdout=%q", code, out)
+	}
+	writeEvidence(t, target, "Security.evtx", "tampered")
+	code, out, errOut := invoke(ctx, "collect", "--case", c, "--target", target)
+	want := "CONFLICT   " + evtxDir + "/Security.evtx  expected=" + sha("security") + " actual=" + sha("tampered") + "\n"
+	if code != 1 || !strings.HasPrefix(out, want) || errOut != "dfirflow: collect: collection incomplete\n" {
+		t.Errorf("conflict: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+}
+
+func TestCollectInterrupted(t *testing.T) {
+	c, target := newCollectCase(t)
+	writeEvidence(t, target, "Security.evtx", "security")
+	// run checks the context once before starting: interrupt right after.
+	if code, _, _ := invoke(&cancelAfter{Context: context.Background(), n: 1}, "collect", "--case", c, "--target", target); code != 130 {
+		t.Errorf("code=%d, want 130", code)
+	}
+	filepath.Walk(filepath.Join(c, "evidence"), func(p string, fi os.FileInfo, err error) error {
+		if strings.HasSuffix(p, ".partial") {
+			t.Errorf("partial copy left: %s", p)
+		}
+		return nil
+	})
+	if log := readLog(t, c); log[len(log)-1]["command"] != "collect" || log[len(log)-1]["exit_code"] != 130.0 {
+		t.Errorf("journal = %v", log[len(log)-1])
+	}
+	code, out, _ := invoke(context.Background(), "case", "verify", "--case", c)
+	if code != 0 || !strings.HasSuffix(out, "0 MODIFIED, 0 MISSING, 0 UNTRACKED\n") {
+		t.Errorf("verify after interrupt: code=%d stdout=%q", code, out)
+	}
+}
+
+// cancelAfter reports cancellation once Err has been called n times.
+type cancelAfter struct {
+	context.Context
+	n int
+}
+
+func (c *cancelAfter) Err() error {
+	if c.n <= 0 {
+		return context.Canceled
+	}
+	c.n--
+	return nil
 }
