@@ -25,7 +25,7 @@ type Case struct {
 	ToolVersion   string    `json:"tool_version"`
 	BaseDir       string    `json:"-"`
 
-	entries map[string]bool // files already in the manifest
+	entries map[string]string // manifest: file → sha256
 }
 
 // Create crée le dossier dir/id ; il échoue si ce dossier existe déjà et ne
@@ -51,7 +51,7 @@ func Create(dir, id, hostname, analyst, toolVersion string, now time.Time) (c *C
 	c = &Case{
 		SchemaVersion: SchemaVersion, ID: id, Hostname: hostname, Analyst: analyst,
 		CreatedAt: now.UTC().Truncate(time.Second), ToolVersion: toolVersion,
-		BaseDir: base, entries: map[string]bool{},
+		BaseDir: base, entries: map[string]string{},
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
@@ -87,11 +87,18 @@ func Open(path string) (*Case, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.entries = make(map[string]bool, len(entries))
+	c.entries = make(map[string]string, len(entries))
 	for _, e := range entries {
-		c.entries[e.File] = true
+		c.entries[e.File] = e.SHA256
 	}
 	return c, nil
+}
+
+// Recorded renvoie l'empreinte de la preuve file (relative à evidence/,
+// séparateur "/") si elle figure au manifeste.
+func (c *Case) Recorded(file string) (sha256 string, ok bool) {
+	sha256, ok = c.entries[file]
+	return sha256, ok
 }
 
 func (c *Case) Dir(kind string) string {

@@ -13,8 +13,9 @@ import (
 var version = "dev"
 
 var (
-	errNotImplemented = errors.New("not implemented yet")
-	errIntegrity      = errors.New("integrity check failed")
+	errNotImplemented    = errors.New("not implemented yet")
+	errIntegrity         = errors.New("integrity check failed")
+	errCollectIncomplete = errors.New("collection incomplete")
 )
 
 // usageError reports a malformed command line (exit code 2).

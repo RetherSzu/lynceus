@@ -24,6 +24,8 @@ Chemin du dossier (non stocké) : `<dir>/<case_id>`.
 
 Ajout seul ; jamais modifié ni supprimé.
 
+> Champ optionnel `origin` ajouté par la spec 004, voir specs/004-evidence-collection/data-model.md.
+
 ## VerifyResult
 
 | Champ | Description |

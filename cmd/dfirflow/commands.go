@@ -5,11 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	casefile "DFIRFlow/internal/case"
+	"DFIRFlow/internal/collector"
 )
 
 // opts holds the parsed options of one command invocation.
@@ -70,9 +72,9 @@ func init() {
 			options: []option{optCase},
 			exec:    caseVerify,
 			example: "dfirflow case verify --case ./cases/CASE-001"},
-		{name: "collect", summary: "Copy and hash evidence into the case",
+		{name: "collect", summary: "Copy and hash Windows event logs into the case", exec: collect,
 			options: []option{optCase, optTarget},
-			example: "dfirflow collect --case ./cases/CASE-001 --target ./evidence"},
+			example: "dfirflow collect --case ./cases/CASE-001 --target /mnt/image"},
 		{name: "ingest", summary: "Parse collected artifacts into normalized events",
 			args: "[path...]", maxArgs: -1,
 			options: []option{optCase},
@@ -334,6 +336,63 @@ func caseVerify(ctx context.Context, o *opts) (err error) {
 		counts[casefile.StatusOK], counts[casefile.StatusModified], counts[casefile.StatusMissing], counts[casefile.StatusUntracked])
 	if counts[casefile.StatusOK] != len(results) {
 		return errIntegrity
+	}
+	return nil
+}
+
+type collectProblem struct {
+	File   string `json:"file"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func collect(ctx context.Context, o *opts) (err error) {
+	started := time.Now()
+	c, err := casefile.Open(o.caseDir.value)
+	if err != nil {
+		return err
+	}
+	target, _ := filepath.Abs(o.target.value)
+	counts := map[string]int{collector.Collected: 0, collector.Already: 0, collector.Conflict: 0, collector.Failed: 0, collector.Skipped: 0}
+	summary := map[string]interface{}{"target": target}
+	var problems []collectProblem
+	defer func() {
+		for k, v := range counts {
+			summary[k] = v
+		}
+		if len(problems) > 0 {
+			summary["problems"] = problems
+		}
+		err = logOperation(ctx, c, "collect", o, started, err, summary)
+	}()
+	results, err := collector.Collect(ctx, c, o.target.value)
+	if err != nil {
+		return err
+	}
+	for _, r := range results {
+		counts[r.Status]++
+		if r.Status != collector.Collected && r.Status != collector.Already {
+			reason := r.Reason
+			if r.Status == collector.Conflict {
+				reason = "expected=" + r.SHA256 + " actual=" + r.Actual
+			}
+			problems = append(problems, collectProblem{r.File, r.Status, reason})
+		}
+		line := fmt.Sprintf("%-10s %s", r.Status, r.File)
+		switch r.Status {
+		case collector.Collected, collector.Already:
+			line += "  sha256=" + r.SHA256
+		case collector.Conflict:
+			line += "  expected=" + r.SHA256 + " actual=" + r.Actual
+		default:
+			line += "  reason=" + r.Reason
+		}
+		fmt.Fprintln(o.stdout, line)
+	}
+	fmt.Fprintf(o.stdout, "%d files: %d COLLECTED, %d ALREADY, %d CONFLICT, %d FAILED, %d SKIPPED\n", len(results),
+		counts[collector.Collected], counts[collector.Already], counts[collector.Conflict], counts[collector.Failed], counts[collector.Skipped])
+	if counts[collector.Failed]+counts[collector.Conflict] > 0 {
+		return errCollectIncomplete
 	}
 	return nil
 }

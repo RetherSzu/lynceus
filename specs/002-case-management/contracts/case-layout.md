@@ -33,6 +33,8 @@
 
 `hashes/manifest.jsonl` :
 
+> Champ optionnel `origin` ajouté par la spec 004, voir specs/004-evidence-collection/data-model.md.
+
 ```json
 {"file":"Windows/System32/winevt/Logs/Security.evtx","sha256":"9f86d0…","size":12345678,"collected_at":"2026-11-03T09:05:00Z"}
 ```

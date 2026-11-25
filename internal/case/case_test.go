@@ -133,7 +133,7 @@ func TestOpen(t *testing.T) {
 func TestAddEvidence(t *testing.T) {
 	c := newCase(t)
 	src := writeFile(t, filepath.Join(t.TempDir(), "Security.evtx"), "evtx-content")
-	e, err := c.AddEvidence(src, filepath.Join("Logs", "Security.evtx"))
+	e, err := c.AddEvidence(context.Background(), src, filepath.Join("Logs", "Security.evtx"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,11 +156,11 @@ func TestAddEvidence(t *testing.T) {
 	}
 
 	for _, rel := range []string{"Logs/Security.evtx", "Logs/../Logs/Security.evtx", "../x", ".", "", filepath.Join(string(filepath.Separator), "abs")} {
-		if _, err := c.AddEvidence(src, rel); err == nil {
+		if _, err := c.AddEvidence(context.Background(), src, rel, nil); err == nil {
 			t.Errorf("AddEvidence(%q): expected an error", rel)
 		}
 	}
-	if _, err := c.AddEvidence(filepath.Join(t.TempDir(), "missing"), "missing.evtx"); err == nil {
+	if _, err := c.AddEvidence(context.Background(), filepath.Join(t.TempDir(), "missing"), "missing.evtx", nil); err == nil {
 		t.Error("unreadable source: expected an error")
 	}
 	if _, err := os.Lstat(filepath.Join(c.BaseDir, "evidence", "missing.evtx.partial")); !os.IsNotExist(err) {
@@ -187,7 +187,7 @@ func TestVerify(t *testing.T) {
 	}
 	dir := t.TempDir()
 	for _, name := range []string{"a.evtx", "b.evtx", "c.evtx", "d.evtx"} {
-		if _, err := c.AddEvidence(writeFile(t, filepath.Join(dir, name), "content of "+name), name); err != nil {
+		if _, err := c.AddEvidence(ctx, writeFile(t, filepath.Join(dir, name), "content of "+name), name, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -252,5 +252,81 @@ func TestLog(t *testing.T) {
 	lines := readLines(t, path)
 	if len(lines) != 2 || lines[0] != first[0] || !strings.Contains(lines[1], `"exit_code":4`) {
 		t.Errorf("log lines = %q", lines)
+	}
+}
+
+func TestAddEvidenceOrigin(t *testing.T) {
+	c := newCase(t)
+	dir := t.TempDir()
+	mod := time.Date(2026, 10, 1, 9, 0, 0, 0, time.FixedZone("CET", 3600))
+	o := &Origin{SourcePath: "/mnt/img/a.evtx", Modified: &mod}
+	if _, err := c.AddEvidence(context.Background(), writeFile(t, filepath.Join(dir, "a.evtx"), "a"), "a.evtx", o); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddEvidence(context.Background(), writeFile(t, filepath.Join(dir, "b.evtx"), "b"), "b.evtx", nil); err != nil {
+		t.Fatal(err)
+	}
+	lines := readLines(t, filepath.Join(c.BaseDir, "hashes", "manifest.jsonl"))
+	if !strings.Contains(lines[0], `"origin":{"source_path":"/mnt/img/a.evtx","modified":"2026-10-01T08:00:00Z"}`) {
+		t.Errorf("origin line = %s", lines[0])
+	}
+	if strings.Contains(lines[1], "origin") {
+		t.Errorf("nil origin written: %s", lines[1])
+	}
+	var e ManifestEntry
+	if err := json.Unmarshal([]byte(lines[0]), &e); err != nil || e.Origin == nil || !e.Origin.Modified.Equal(mod) || e.Origin.Accessed != nil {
+		t.Errorf("read back = %+v, %v", e.Origin, err)
+	}
+}
+
+func TestAddEvidenceCancelled(t *testing.T) {
+	c := newCase(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	src := writeFile(t, filepath.Join(t.TempDir(), "a.evtx"), "a")
+	if _, err := c.AddEvidence(ctx, src, "a.evtx", nil); err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, p := range []string{"a.evtx", "a.evtx.partial"} {
+		if _, err := os.Lstat(filepath.Join(c.BaseDir, "evidence", p)); !os.IsNotExist(err) {
+			t.Errorf("%s left behind", p)
+		}
+	}
+	if lines := readLines(t, filepath.Join(c.BaseDir, "hashes", "manifest.jsonl")); len(lines) != 0 {
+		t.Errorf("manifest = %q", lines)
+	}
+}
+
+func TestRecorded(t *testing.T) {
+	c := newCase(t)
+	if _, ok := c.Recorded("Logs/a.evtx"); ok {
+		t.Error("unknown file recorded")
+	}
+	e, err := c.AddEvidence(context.Background(), writeFile(t, filepath.Join(t.TempDir(), "a.evtx"), "a"), filepath.Join("Logs", "a.evtx"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum, ok := c.Recorded("Logs/a.evtx"); !ok || sum != e.SHA256 {
+		t.Errorf("Recorded after add = %q, %v", sum, ok)
+	}
+	reopened, err := Open(c.BaseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum, ok := reopened.Recorded("Logs/a.evtx"); !ok || sum != e.SHA256 {
+		t.Errorf("Recorded after Open = %q, %v", sum, ok)
+	}
+}
+
+func TestOpenSpec002Manifest(t *testing.T) {
+	c := newCase(t)
+	writeFile(t, filepath.Join(c.BaseDir, "hashes", "manifest.jsonl"),
+		`{"file":"a.evtx","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08","size":4,"collected_at":"2026-11-03T09:05:00Z"}`+"\n")
+	reopened, err := Open(c.BaseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reopened.Recorded("a.evtx"); !ok {
+		t.Error("spec 002 entry not loaded")
 	}
 }

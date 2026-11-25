@@ -1,6 +1,7 @@
 package casefile
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -16,18 +17,37 @@ type ManifestEntry struct {
 	SHA256      string    `json:"sha256"`
 	Size        int64     `json:"size"`
 	CollectedAt time.Time `json:"collected_at"`
+	Origin      *Origin   `json:"origin,omitempty"`
+}
+
+// Origin décrit le fichier source d'une preuve au moment de sa collecte. Un
+// horodatage que le système de fichiers source ne fournit pas est nil.
+type Origin struct {
+	SourcePath string     `json:"source_path"`
+	Modified   *time.Time `json:"modified,omitempty"`
+	Accessed   *time.Time `json:"accessed,omitempty"`
+	Changed    *time.Time `json:"changed,omitempty"`
+	Created    *time.Time `json:"created,omitempty"`
+}
+
+func utc(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 // AddEvidence copie src sous evidence/rel en la hachant, vérifie la copie,
-// l'ajoute au manifeste puis la passe en lecture seule. En cas d'échec,
-// aucune copie ni entrée ne subsiste.
-func (c *Case) AddEvidence(src, rel string) (ManifestEntry, error) {
+// l'ajoute au manifeste (avec origin, si non nil) puis la passe en lecture
+// seule. En cas d'échec ou d'annulation de ctx, aucune copie ni entrée ne subsiste.
+func (c *Case) AddEvidence(ctx context.Context, src, rel string, origin *Origin) (ManifestEntry, error) {
 	rel, err := cleanRel(rel)
 	if err != nil {
 		return ManifestEntry{}, err
 	}
 	file := filepath.ToSlash(rel)
-	if c.entries[file] {
+	if _, ok := c.entries[file]; ok {
 		return ManifestEntry{}, fmt.Errorf("evidence %q already recorded", file)
 	}
 	dst := filepath.Join(c.Dir("evidence"), rel)
@@ -44,7 +64,7 @@ func (c *Case) AddEvidence(src, rel string) (ManifestEntry, error) {
 		return ManifestEntry{}, err
 	}
 	partial := dst + ".partial"
-	sum, size, err := copyHashed(partial, in)
+	sum, size, err := copyHashed(partial, ctxReader{ctx, in})
 	if err != nil {
 		os.Remove(partial)
 		return ManifestEntry{}, err
@@ -61,11 +81,16 @@ func (c *Case) AddEvidence(src, rel string) (ManifestEntry, error) {
 		return ManifestEntry{}, err
 	}
 	e := ManifestEntry{File: file, SHA256: sum, Size: size, CollectedAt: time.Now().UTC().Truncate(time.Second)}
+	if origin != nil {
+		o := *origin
+		o.Modified, o.Accessed, o.Changed, o.Created = utc(o.Modified), utc(o.Accessed), utc(o.Changed), utc(o.Created)
+		e.Origin = &o
+	}
 	if err := appendLine(c.manifestPath(), e); err != nil {
 		os.Remove(dst)
 		return ManifestEntry{}, err
 	}
-	c.entries[file] = true
+	c.entries[file] = sum
 	return e, os.Chmod(dst, 0o444)
 }
 
