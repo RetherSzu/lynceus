@@ -13,8 +13,10 @@ import (
 	casefile "DFIRFlow/internal/case"
 	"DFIRFlow/internal/collector"
 	"DFIRFlow/internal/ingest"
+	"DFIRFlow/internal/normalizer"
 	"DFIRFlow/internal/parser"
 	"DFIRFlow/internal/parser/evtx"
+	"DFIRFlow/internal/timeline"
 )
 
 // opts holds the parsed options of one command invocation.
@@ -24,7 +26,7 @@ type opts struct {
 	format                              onceString
 	positionals                         []string
 	argv                                []string // command arguments, for the case journal
-	stdout                              io.Writer
+	stdout, stderr                      io.Writer
 }
 
 type option struct {
@@ -95,7 +97,7 @@ func init() {
 				{"to", "<date-time>", "end bound, RFC 3339 (UTC if no zone)", false, func(o *opts) *onceString { return &o.to }},
 				{"source", "<list>", "comma-separated sources: " + strings.Join(sources, ", "), false, func(o *opts) *onceString { return &o.source }},
 			},
-			check:   checkTimeline,
+			check: checkTimeline, exec: timelineCmd,
 			example: "dfirflow timeline --case ./cases/CASE-001 --from 2026-11-01T00:00:00Z --source evtx,prefetch"},
 		{name: "detect", summary: "Apply detection rules to normalized events",
 			options: []option{optCase,
@@ -452,6 +454,59 @@ func ingestCmd(ctx context.Context, o *opts) (err error) {
 		return errIngestIncomplete
 	}
 	return nil
+}
+
+// timelineCmd construit timeline/timeline.jsonl (contracts/timeline.md).
+func timelineCmd(ctx context.Context, o *opts) (err error) {
+	started := time.Now()
+	c, err := casefile.Open(o.caseDir.value)
+	if err != nil {
+		return err
+	}
+	var f timeline.Filter
+	filter := map[string]interface{}{}
+	f.From, _ = parseTime("from", o.from) // déjà validés par checkTimeline
+	f.To, _ = parseTime("to", o.to)
+	if o.from.set {
+		filter["from"] = normalizer.Time{Time: f.From}
+	}
+	if o.to.set {
+		filter["to"] = normalizer.Time{Time: f.To}
+	}
+	if o.source.set {
+		f.Sources, _ = parseList("source", o.source.value, sources)
+		filter["sources"] = f.Sources
+	}
+	var sum timeline.Summary
+	defer func() {
+		summary := map[string]interface{}{"filter": filter, "files": sum.Files,
+			"events_read": sum.EventsRead, "events_written": sum.EventsWritten}
+		if sum.SHA256 != "" {
+			summary["sha256"] = sum.SHA256
+		}
+		if len(sum.MissingSources) > 0 {
+			summary["missing_sources"] = sum.MissingSources
+		}
+		if len(sum.UnknownFiles) > 0 {
+			summary["unknown_files"] = sum.UnknownFiles
+		}
+		if err != nil {
+			summary["error"] = err.Error()
+		}
+		err = logOperation(ctx, c, "timeline", o, started, err, summary)
+	}()
+	sum, err = timeline.Run(ctx, c, f)
+	for _, u := range sum.UnknownFiles {
+		fmt.Fprintf(o.stderr, "dfirflow: timeline: warning: not in the case manifest: %s\n", u)
+	}
+	for _, s := range sum.MissingSources {
+		fmt.Fprintf(o.stderr, "dfirflow: timeline: warning: no event from source %s\n", s)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(o.stdout, "timeline: %d files, %d events read, %d written: timeline/timeline.jsonl\n", sum.Files, sum.EventsRead, sum.EventsWritten)
+	return err
 }
 
 // logOperation journalise la commande dans le cas ; un échec d'écriture du
