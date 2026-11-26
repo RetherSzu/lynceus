@@ -32,21 +32,21 @@ preuve.
   │  evidence/  (lecture seule)  ◀── manifeste SHA-256, journal        │
   └───────────────────────────────┬────────────────────────────────────┘
                                   ▼
-                    ingest (005, codé) : vérifie l'empreinte,
+                    ingest (005, livré) : vérifie l'empreinte,
                     choisit le parser par signature
                                   ▼
-                    Parser (contrat 003, livré) : EVTX 005 (codé),
+                    Parser (contrat 003, livré) : EVTX 005 (livré),
                     USN 007, registre 008, $MFT 009, Prefetch 010 (prévus)
                                   │  Event + Anomaly
                                   ▼
                     Validation centralisée (003, livré)
                                   │  JSONL canonique
                                   ▼
-                    normalized/  (005, codé) : événements + anomalies
+                    normalized/  (005, livré) : événements + anomalies
                                   │
               ┌───────────────────┼────────────────────┐
               ▼                   ▼                    ▼
-     timeline/ (006, prévu)  detections/ (012, prévu)  corrélation (prévu)
+     timeline/ (006, codé)   detections/ (012, prévu)  corrélation (prévu)
               └───────────────────┼────────────────────┘
                                   ▼
                      reports/ : HTML, SQLite, JSONL (prévu)
@@ -65,8 +65,8 @@ arguments et appelle les packages internes.
 | 002 | Dossier de cas, manifeste, vérification d'intégrité, journal | Livré |
 | 003 | Modèle `Event`, `Detection`, contrat `Parser`, JSONL canonique | Livré |
 | 004 | `collect` : copie des journaux EVTX dans le cas, métadonnées d'origine | Livré |
-| 005 | Parser EVTX natif (fork interne, ADR-002) + `ingest` | Codé |
-| 006 | `timeline` | Prévu |
+| 005 | Parser EVTX natif (fork interne, ADR-002) + `ingest` | Livré |
+| 006 | `timeline` | Codé |
 | 007–012 | USN, registre, $MFT, Prefetch, importers, détection | Prévu |
 
 ---
@@ -110,12 +110,13 @@ internal/
 │   └── jsonl.go              Encoder, ReadEvents, ReadDetections, tri
 ├── parser/                Livré : contrat commun à tous les parsers et importers
 │   ├── parser.go             Source, Anomaly, Sink, Parser, Validating
-│   └── evtx/              Codé (spec 005)
+│   └── evtx/              Livré (spec 005)
 │       ├── binxml/           fork de Velocidex/evtx (Apache-2.0, LICENSE + NOTICE)
 │       ├── parser.go         Parser EVTX : contrat de la spec 003
 │       ├── mapping.go        chargement et application de la table
 │       └── mapping.json      table de correspondance EVTX (données)
-└── ingest/                Codé (spec 005) : intégrité, choix du parser, écriture de normalized/
+├── ingest/                Livré (spec 005) : intégrité, choix du parser, écriture de normalized/
+└── timeline/              Codé (spec 006) : sélection, filtres, tri externe, écriture atomique
 specs/NNN-*/                  spec, plan, recherche, contrats, tâches de chaque fonctionnalité
 docs/adr/                     décisions d'architecture
 .specify/memory/constitution.md   9 principes non négociables
@@ -135,13 +136,13 @@ Le dossier `spikes/` (code jetable des études) est ignoré par git.
 | `case init <ID> --host --analyst [--dir]` | crée le dossier de cas | Livré |
 | `case verify --case` | recalcule les SHA-256, détecte toute altération | Livré |
 | `collect --case --target` | copie les journaux EVTX d'un volume dans le cas | Livré (004) |
-| `ingest --case [chemins…]` | décode les preuves vers `normalized/` | Codé (005) |
+| `ingest --case [chemins…]` | décode les preuves vers `normalized/` | Livré (005) |
 | `import --case --tool <outil> <chemin>` | lit les sorties d'un outil tiers | Prévu (011) |
-| `timeline --case [--from --to --source]` | chronologie filtrée | Prévu (006) |
+| `timeline --case [--from --to --source]` | chronologie filtrée vers `timeline/timeline.jsonl` | Codé (006) |
 | `detect --case [--rules]` | applique les règles | Prévu (012) |
 | `correlate --case` | reconstitue les chaînes d'attaque | Prévu |
 | `report --case --format html,sqlite,jsonl` | produit les livrables | Prévu |
-| `investigate --case --target` | enchaîne les étapes, sans logique propre ; collecte et ingère, puis s'arrête à `timeline` | Partiel |
+| `investigate --case --target` | enchaîne les étapes, sans logique propre ; collecte, ingère, construit la chronologie, puis s'arrête à `detect` | Partiel |
 
 Les commandes non livrées répondent « not implemented yet », avec le code 3.
 
@@ -157,7 +158,7 @@ Les commandes non livrées répondent « not implemented yet », avec le code 3.
 - Refuse un cas situé sous la cible ; ne modifie jamais la cible.
 - Entrée `collect` dans `case.log` : cible, compteurs, liste `problems`.
 
-### `ingest` (spec 005, codé)
+### `ingest` (spec 005, livré)
 
 - Traite les preuves du manifeste (toutes, ou celles désignées) ; reconnaît un EVTX à sa signature.
 - Vérifie l'empreinte de chaque preuve avant de la décoder : une preuve altérée est `ALTERED`
@@ -166,6 +167,15 @@ Les commandes non livrées répondent « not implemented yet », avec le code 3.
   de façon atomique ; une relance produit des fichiers identiques.
 - Résumé : statut par preuve, nombres d'événements et d'anomalies, part des événements `other` et
   les dix (canal, EventID) non classés les plus fréquents.
+
+### `timeline` (spec 006, codé)
+
+- Lit `normalized/<preuve>.jsonl` des seules preuves du manifeste ; les anomalies et les fichiers
+  `.partial` ne sont jamais lus ; un fichier sans preuve au manifeste est signalé.
+- Filtres facultatifs : `--from`, `--to` (bornes incluses, UTC par défaut, à la microseconde),
+  `--source` ; chaque événement apparaît une seule fois, à son horodatage principal.
+- Écrit `timeline/timeline.jsonl` dans l'ordre canonique ; la précédente n'est remplacée qu'une fois
+  la nouvelle complète ; l'entrée `case.log` porte les filtres, les compteurs et le SHA-256.
 
 ---
 
@@ -177,8 +187,8 @@ Les commandes non livrées répondent « not implemented yet », avec le code 3.
 ├── case.log               une ligne par commande exécutée (ajout seul)
 ├── evidence/              copies des preuves, en lecture seule (alimenté par collect)
 ├── parsed/                réservé, non utilisé
-├── normalized/            événements et anomalies JSONL (005, codé)
-├── timeline/              chronologie (006, prévu)
+├── normalized/            événements et anomalies JSONL (005, livré)
+├── timeline/              timeline.jsonl, chronologie JSONL (006, codé)
 ├── detections/            détections JSONL (012, prévu)
 ├── reports/               HTML / SQLite / JSONL (prévu)
 └── hashes/manifest.jsonl  empreinte et origine de chaque preuve (ajout seul)
@@ -303,7 +313,7 @@ manifest.jsonl {file, sha256} ──┴─▶ Source ──▶ Parser.Parse(ctx,
            ├─ valide   ─▶ consommateur ─▶ Encoder ─▶ normalized/*.jsonl
            └─ invalide ─▶ Anomaly{kind: invalid}  (jamais ignoré en silence)
 
-normalized/*.jsonl ─▶ ReadEvents ─▶ SortEvents ─▶ timeline (006) / règles (012)
+normalized/*.jsonl ─▶ ReadEvents ─▶ filtre ─▶ tri externe ─▶ timeline/timeline.jsonl (006) ─▶ règles (012)
                                                          │
                                          Detection{events: [uid…]} ─▶ detections/*.jsonl
 ```
@@ -332,7 +342,7 @@ Contrat normatif : [specs/003-event-model/contracts/event-model.md](../specs/003
 
 ---
 
-## 8. Parser EVTX et ingestion (spec 005, codé)
+## 8. Parser EVTX et ingestion (spec 005, livré)
 
 ```text
 evidence/…/Security.evtx
@@ -359,7 +369,28 @@ normalized/…/Security.evtx.jsonl   +   normalized/…/Security.evtx.anomalies.
 
 ---
 
-## 9. Principes qui contraignent l'architecture
+## 9. Chronologie (spec 006, codé)
+
+```text
+manifeste ─▶ normalized/<preuve>.jsonl (preuves du manifeste, dans l'ordre du manifeste)
+        │  ReadEvents : décodage strict, ligne refusée → échec (fichier, numéro de ligne)
+        ▼  filtre --from / --to / --source
+segments triés en mémoire (64 Mio au plus) ─▶ timeline/.work-*/seg-* si nécessaire
+        │  fusion par tas, 128 segments au plus par passe, octets recopiés tels quels
+        ▼
+timeline/timeline.jsonl.partial ─▶ SHA-256 au fil de l'écriture ─▶ renommage en timeline.jsonl
+```
+
+- **Ordre total** : `timestamp` (µs), `source_file`, `record_id`, `uid` ; le résultat ne dépend ni
+  du découpage en segments ni de l'ordre des fichiers.
+- **Mémoire bornée** : seuls les segments en cours de tri sont en mémoire ; les fichiers de travail
+  restent dans le cas et sont supprimés en succès, en échec ou à l'interruption.
+- **Une seule chronologie par cas**, remplacée à chaque exécution ; les filtres de chaque version
+  sont dans `case.log`.
+
+---
+
+## 10. Principes qui contraignent l'architecture
 
 | Principe | Effet concret |
 |---|---|
@@ -375,7 +406,7 @@ normalized/…/Security.evtx.jsonl   +   normalized/…/Security.evtx.anomalies.
 
 ---
 
-## 10. Points ouverts
+## 11. Points ouverts
 
 - **Taxonomie des événements** : la liste fermée de la spec 003 compte dix types. Son
   élargissement (deux niveaux catégorie / type, alignés sur ECS ou OCSF) demandera une spec qui
@@ -383,5 +414,7 @@ normalized/…/Security.evtx.jsonl   +   normalized/…/Security.evtx.anomalies.
 - **Oracle EvtxECmd** : nécessite un environnement .NET ; ses sorties de référence seront produites
   hors CI (spec 005).
 - **Collecte live** (DF-13) et **décodage parallèle** (DF-18) : reportés (cycles ultérieurs).
+- **Exécutions simultanées sur un même cas** : non gérées (pas de verrou de cas) ; `ingest` et
+  `timeline` supposent une seule commande à la fois.
 - **Récupération d'enregistrements EVTX supprimés** (espace libre des chunks, constat C13) : non
   planifiée.

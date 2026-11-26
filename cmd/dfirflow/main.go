@@ -126,7 +126,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil || o == nil {
 		return wrap(c.name, err)
 	}
-	o.argv, o.stdout = rest, stdout
+	o.argv, o.stdout, o.stderr = rest, stdout, stderr
 	if err := ctx.Err(); err != nil {
 		return err
 	}
