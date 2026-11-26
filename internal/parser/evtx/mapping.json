@@ -1,0 +1,179 @@
+[
+  {
+    "channel": "Microsoft-Windows-PowerShell/Operational",
+    "provider": "Microsoft-Windows-PowerShell",
+    "event_id": 4104,
+    "event_type": "script_execution",
+    "fields": {
+      "file_path": "Path"
+    }
+  },
+  {
+    "channel": "Microsoft-Windows-Sysmon/Operational",
+    "provider": "Microsoft-Windows-Sysmon",
+    "event_id": 1,
+    "event_type": "process_creation",
+    "action_time": "UtcTime",
+    "action_time_type": "executed",
+    "fields": {
+      "subject.domain": "User",
+      "process": "Image",
+      "process_id": "ProcessId",
+      "parent_process": "ParentImage",
+      "parent_process_id": "ParentProcessId",
+      "command_line": "CommandLine",
+      "hashes": "Hashes"
+    }
+  },
+  {
+    "channel": "Microsoft-Windows-Windows Defender/Operational",
+    "provider": "Microsoft-Windows-Windows Defender",
+    "event_id": 1116,
+    "event_type": "malware_detected",
+    "fields": {
+      "subject.domain": "Detection User",
+      "process": "Process Name",
+      "file_path": "Path"
+    }
+  },
+  {
+    "channel": "Microsoft-Windows-Windows Defender/Operational",
+    "provider": "Microsoft-Windows-Windows Defender",
+    "event_id": 1117,
+    "event_type": "malware_detected",
+    "fields": {
+      "subject.domain": "Detection User",
+      "process": "Process Name",
+      "file_path": "Path"
+    }
+  },
+  {
+    "channel": "Microsoft-Windows-Windows Defender/Operational",
+    "provider": "Microsoft-Windows-Windows Defender",
+    "event_id": 5001,
+    "event_type": "av_config_change",
+    "fields": {}
+  },
+  {
+    "channel": "Microsoft-Windows-Windows Defender/Operational",
+    "provider": "Microsoft-Windows-Windows Defender",
+    "event_id": 5007,
+    "event_type": "av_config_change",
+    "fields": {}
+  },
+  {
+    "channel": "Security",
+    "provider": "Microsoft-Windows-Eventlog",
+    "event_id": 1102,
+    "event_type": "log_cleared",
+    "fields": {
+      "subject.sid": "SubjectUserSid",
+      "subject.domain": "SubjectDomainName",
+      "subject.name": "SubjectUserName"
+    }
+  },
+  {
+    "channel": "Security",
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "event_id": 4624,
+    "event_type": "logon",
+    "fields": {
+      "subject.sid": "SubjectUserSid",
+      "subject.domain": "SubjectDomainName",
+      "subject.name": "SubjectUserName",
+      "target.sid": "TargetUserSid",
+      "target.domain": "TargetDomainName",
+      "target.name": "TargetUserName",
+      "process": "ProcessName",
+      "process_id": "ProcessId"
+    }
+  },
+  {
+    "channel": "Security",
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "event_id": 4625,
+    "event_type": "logon_failed",
+    "fields": {
+      "subject.sid": "SubjectUserSid",
+      "subject.domain": "SubjectDomainName",
+      "subject.name": "SubjectUserName",
+      "target.sid": "TargetUserSid",
+      "target.domain": "TargetDomainName",
+      "target.name": "TargetUserName",
+      "process": "ProcessName",
+      "process_id": "ProcessId"
+    }
+  },
+  {
+    "channel": "Security",
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "event_id": 4634,
+    "event_type": "logoff",
+    "fields": {
+      "target.sid": "TargetUserSid",
+      "target.domain": "TargetDomainName",
+      "target.name": "TargetUserName"
+    }
+  },
+  {
+    "channel": "Security",
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "event_id": 4647,
+    "event_type": "logoff",
+    "fields": {
+      "target.sid": "TargetUserSid",
+      "target.domain": "TargetDomainName",
+      "target.name": "TargetUserName"
+    }
+  },
+  {
+    "channel": "Security",
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "event_id": 4688,
+    "event_type": "process_creation",
+    "fields": {
+      "subject.sid": "SubjectUserSid",
+      "subject.domain": "SubjectDomainName",
+      "subject.name": "SubjectUserName",
+      "target.sid": "TargetUserSid",
+      "target.domain": "TargetDomainName",
+      "target.name": "TargetUserName",
+      "process": "NewProcessName",
+      "process_id": "NewProcessId",
+      "parent_process": "ParentProcessName",
+      "parent_process_id": "ProcessId",
+      "command_line": "CommandLine"
+    }
+  },
+  {
+    "channel": "Security",
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "event_id": 4697,
+    "event_type": "service_install",
+    "fields": {
+      "subject.sid": "SubjectUserSid",
+      "subject.domain": "SubjectDomainName",
+      "subject.name": "SubjectUserName",
+      "file_path": "ServiceFileName"
+    }
+  },
+  {
+    "channel": "System",
+    "provider": "Microsoft-Windows-Eventlog",
+    "event_id": 104,
+    "event_type": "log_cleared",
+    "fields": {
+      "subject.domain": "SubjectDomainName",
+      "subject.name": "SubjectUserName"
+    }
+  },
+  {
+    "channel": "System",
+    "provider": "Service Control Manager",
+    "event_id": 7045,
+    "event_type": "service_install",
+    "fields": {
+      "file_path": "ImagePath"
+    }
+  }
+]

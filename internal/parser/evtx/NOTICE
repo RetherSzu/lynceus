@@ -1,0 +1,9 @@
+Table de correspondance EVTX (mapping.json)
+
+Les correspondances de champs ont été établies à partir des noms de champs
+EventData / UserData des événements Windows documentés par Microsoft. Aucune
+correspondance n'est reprise des Maps d'EvtxECmd (MIT) à ce jour ; toute
+reprise future sera mentionnée ici avec sa source.
+
+Le décodeur binxml/ est dérivé de Velocidex/evtx (Apache-2.0) : voir
+binxml/NOTICE et binxml/LICENSE.

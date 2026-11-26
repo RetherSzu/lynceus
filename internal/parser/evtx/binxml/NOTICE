@@ -1,0 +1,29 @@
+Ce dossier contient du code dérivé de :
+
+  www.velocidex.com/golang/evtx v0.2.0
+  Copyright 2018 Velocidex Innovations
+  Licence Apache-2.0 (voir LICENSE)
+
+Fichiers repris : evtx.go, normalize.go, debug.go. Fichiers non repris :
+messages*.go et resolver*.go (résolution des messages, dépendance MPL-2.0
+golang-lru), utils.go (dépendance go-spew), cmd/.
+
+Modifications apportées pour DFIRFlow (ADR-002) :
+
+- package renommé binxml ; github.com/pkg/errors remplacé par la bibliothèque
+  standard ; github.com/Velocidex/ordereddict remplacé par odict.go ;
+- lecture par io.ReaderAt (OpenFile, File.ReadChunk) ; nombre de chunks déduit
+  de la taille du fichier ; champ ChunkCount de l'en-tête placé à son décalage ;
+  GetChunks, NewChunk, Chunk.Parse et ParseFile retirés ;
+- comptage des enregistrements annoncés par l'en-tête de chunk : chaque
+  enregistrement non lu est rendu (Lost : unreadable, missing, truncated) au
+  lieu d'être abandonné en silence ;
+- lectures bornées : aucune allocation de la taille lue dans le fichier,
+  tailles d'enregistrement et nombre d'arguments vérifiés, profondeur
+  d'imbrication limitée, panique résiduelle convertie en enregistrement
+  illisible ;
+- modèles identifiés par leur position de définition dans le chunk, relus à
+  cette position s'ils n'ont pas encore été vus ;
+- valeurs typées (DecodeValue) : HexInt32/HexInt64 conservés, entiers signés
+  (dont MessageNumber), réels, SizeT, SystemTime, FILETIME sans perte de
+  précision, SID et GUID typés.

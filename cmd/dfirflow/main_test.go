@@ -188,7 +188,6 @@ func TestNotImplemented(t *testing.T) {
 	dir := t.TempDir()
 	c := filepath.Join(dir, "cases", "CASE-001")
 	tests := [][]string{
-		{"ingest", "--case", c},
 		{"import", "--case", c, "--tool", "hayabusa", filepath.Join(dir, "out.jsonl")},
 		{"timeline", "--case", c, "--from", "2026-11-01T00:00:00", "--to", "2026-11-02T00:00:00+01:00", "--source", "evtx,mft,usnjrnl,registry,prefetch,memory"},
 		{"detect", "--case", c, "--rules", filepath.Join(dir, "rules")},
@@ -214,9 +213,9 @@ func TestNotImplemented(t *testing.T) {
 	cases := filepath.Join(inv, "cases")
 	invoke(context.Background(), "case", "init", "CASE-001", "--host", "H", "--analyst", "A", "--dir", cases)
 	target := filepath.Join(inv, "target")
-	writeEvidence(t, target, "Security.evtx", "s")
+	writeEvidence(t, target, "Security.evtx", string(fixture(t)))
 	code, _, errOut := invoke(context.Background(), "investigate", "--case", filepath.Join(cases, "CASE-001"), "--target", target)
-	if want := "dfirflow: investigate: ingest: not implemented yet\n"; code != 3 || errOut != want {
+	if want := "dfirflow: investigate: timeline: not implemented yet\n"; code != 3 || errOut != want {
 		t.Errorf("investigate: code=%d stderr=%q, want 3 and %q", code, errOut, want)
 	}
 }
@@ -273,10 +272,10 @@ func TestCollectCommand(t *testing.T) {
 
 func TestScriptUsage(t *testing.T) {
 	bg := context.Background()
-	if code, out, _ := invoke(bg, "ingest", "./logs", "--case", "./cases/CASE-001"); code != 3 || out != "" {
+	if code, out, _ := invoke(bg, "import", "./out.jsonl", "--case", "./cases/CASE-001", "--tool", "hayabusa"); code != 3 || out != "" {
 		t.Errorf("options after positionals: code=%d stdout=%q", code, out)
 	}
-	if code, _, _ := invoke(bg, "ingest", "--case", "./cases/CASE-001", "--", "-fichier.evtx"); code != 3 {
+	if code, _, _ := invoke(bg, "import", "--case", "./cases/CASE-001", "--tool", "hayabusa", "--", "-fichier.jsonl"); code != 3 {
 		t.Errorf("'--' separator: code=%d", code)
 	}
 	cancelled, cancel := context.WithCancel(bg)
@@ -437,4 +436,116 @@ func (c *cancelAfter) Err() error {
 	}
 	c.n--
 	return nil
+}
+
+const securityEvidence = evtxDir + "/Security.evtx"
+
+func fixture(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile("../../internal/parser/evtx/testdata/Security.evtx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// newIngestCase collects Security.evtx (fixture) and the given extra logs.
+func newIngestCase(t *testing.T, extra map[string]string) string {
+	t.Helper()
+	c, target := newCollectCase(t)
+	writeEvidence(t, target, "Security.evtx", string(fixture(t)))
+	for name, content := range extra {
+		writeEvidence(t, target, name, content)
+	}
+	if code, _, errOut := invoke(context.Background(), "collect", "--case", c, "--target", target); code != 0 {
+		t.Fatalf("collect: %s", errOut)
+	}
+	return c
+}
+
+func TestIngestCommand(t *testing.T) {
+	ctx := context.Background()
+	c := newIngestCase(t, nil)
+	code, out, errOut := invoke(ctx, "ingest", "--case", c)
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if code != 0 || errOut != "" || len(lines) != 3 ||
+		lines[0] != "INGESTED  "+securityEvidence+"  events=739 anomalies=0" ||
+		lines[1] != "1 files: 1 INGESTED, 0 SKIPPED, 0 ALTERED, 0 FAILED; 739 events, 0 anomalies" ||
+		!strings.HasPrefix(lines[2], "other: 68.6% (507 events); top: Security/4627=194, ") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+
+	// Preuve EVTX à l'en-tête tronqué : FAILED, code 1 (FR-019).
+	c = newIngestCase(t, map[string]string{"Broken.evtx": string(fixture(t)[:100])})
+	code, out, errOut = invoke(ctx, "ingest", "--case", c)
+	if code != 1 || errOut != "dfirflow: ingest: ingestion incomplete\n" || !strings.HasPrefix(out, "FAILED    "+evtxDir+"/Broken.evtx  reason=") {
+		t.Fatalf("failed evidence: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+}
+
+func TestIngestLog(t *testing.T) {
+	ctx := context.Background()
+	c := newIngestCase(t, map[string]string{"Copy.evtx": string(fixture(t))})
+	invoke(ctx, "ingest", "--case", c)
+	last := readLog(t, c)
+	entry := last[len(last)-1]
+	if entry["command"] != "ingest" || entry["exit_code"] != 0.0 {
+		t.Fatalf("clean run journal = %v", entry)
+	}
+
+	p := filepath.Join(c, "evidence", filepath.FromSlash(securityEvidence))
+	os.Chmod(p, 0o644)
+	data := fixture(t)
+	data[7000] ^= 0xff
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := invoke(ctx, "ingest", "--case", c)
+	if code != 4 || errOut != "dfirflow: ingest: integrity check failed\n" {
+		t.Fatalf("altered: code=%d stderr=%q", code, errOut)
+	}
+	last = readLog(t, c)
+	entry = last[len(last)-1]
+	sum, _ := entry["summary"].(map[string]interface{})
+	files, _ := sum["files"].([]interface{})
+	if entry["exit_code"] != 4.0 || sum["ALTERED"] != 1.0 || sum["INGESTED"] != 1.0 || sum["events"] != 739.0 ||
+		sum["anomalies"] != 0.0 || sum["other_ratio"] != "0.686" || len(files) != 2 {
+		t.Fatalf("journal = %v", entry)
+	}
+	top, _ := sum["top_other"].([]interface{})
+	if len(top) != 10 || top[0].(map[string]interface{})["event_id"] != 4627.0 {
+		t.Fatalf("top_other = %v", top)
+	}
+	first := files[0].(map[string]interface{})
+	second := files[1].(map[string]interface{})
+	if first["file"] != evtxDir+"/Copy.evtx" || first["reason"] != nil ||
+		second["file"] != securityEvidence || second["status"] != "ALTERED" || !strings.HasPrefix(second["reason"].(string), "expected=") {
+		t.Fatalf("files = %v", files)
+	}
+}
+
+func TestIngestInterrupted(t *testing.T) {
+	c := newIngestCase(t, nil)
+	invoke(context.Background(), "ingest", "--case", c)
+	out := filepath.Join(c, "normalized", filepath.FromSlash(securityEvidence)+".jsonl")
+	before, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Interruption pendant le décodage (après la vérification d'empreinte).
+	if code, _, _ := invoke(&cancelAfter{Context: context.Background(), n: 120}, "ingest", "--case", c); code != 130 {
+		t.Fatalf("code=%d, want 130", code)
+	}
+	filepath.Walk(filepath.Join(c, "normalized"), func(p string, fi os.FileInfo, err error) error {
+		if strings.HasSuffix(p, ".partial") {
+			t.Errorf("partial file left: %s", p)
+		}
+		return nil
+	})
+	if after, _ := os.ReadFile(out); !bytes.Equal(before, after) {
+		t.Error("previous normalized file changed")
+	}
+	if log := readLog(t, c); log[len(log)-1]["command"] != "ingest" || log[len(log)-1]["exit_code"] != 130.0 {
+		t.Errorf("journal = %v", log[len(log)-1])
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -99,6 +100,13 @@ func Open(path string) (*Case, error) {
 func (c *Case) Recorded(file string) (sha256 string, ok bool) {
 	sha256, ok = c.entries[file]
 	return sha256, ok
+}
+
+// Evidence renvoie les entrées du manifeste, triées par chemin.
+func (c *Case) Evidence() ([]ManifestEntry, error) {
+	entries, err := c.manifest()
+	sort.Slice(entries, func(i, j int) bool { return entries[i].File < entries[j].File })
+	return entries, err
 }
 
 func (c *Case) Dir(kind string) string {

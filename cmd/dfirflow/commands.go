@@ -12,6 +12,9 @@ import (
 
 	casefile "DFIRFlow/internal/case"
 	"DFIRFlow/internal/collector"
+	"DFIRFlow/internal/ingest"
+	"DFIRFlow/internal/parser"
+	"DFIRFlow/internal/parser/evtx"
 )
 
 // opts holds the parsed options of one command invocation.
@@ -77,8 +80,8 @@ func init() {
 			example: "dfirflow collect --case ./cases/CASE-001 --target /mnt/image"},
 		{name: "ingest", summary: "Parse collected artifacts into normalized events",
 			args: "[path...]", maxArgs: -1,
-			options: []option{optCase},
-			example: "dfirflow ingest --case ./cases/CASE-001 ./cases/CASE-001/evidence/Security.evtx"},
+			options: []option{optCase}, exec: ingestCmd,
+			example: "dfirflow ingest --case ./cases/CASE-001 Windows/System32/winevt/Logs/Security.evtx"},
 		{name: "import", summary: "Read third-party tool output (never executes the tool)",
 			args: "<path>", minArgs: 1, maxArgs: 1,
 			options: []option{optCase,
@@ -393,6 +396,60 @@ func collect(ctx context.Context, o *opts) (err error) {
 		counts[collector.Collected], counts[collector.Already], counts[collector.Conflict], counts[collector.Failed], counts[collector.Skipped])
 	if counts[collector.Failed]+counts[collector.Conflict] > 0 {
 		return errCollectIncomplete
+	}
+	return nil
+}
+
+// ingestCmd décode les preuves du cas vers normalized/ (contracts/ingest.md).
+func ingestCmd(ctx context.Context, o *opts) (err error) {
+	started := time.Now()
+	c, err := casefile.Open(o.caseDir.value)
+	if err != nil {
+		return err
+	}
+	counts := map[string]int{ingest.Ingested: 0, ingest.Skipped: 0, ingest.Altered: 0, ingest.Failed: 0}
+	var sum ingest.Summary
+	defer func() {
+		summary := map[string]interface{}{
+			"events": sum.Events, "anomalies": sum.Anomalies, "other_ratio": sum.OtherRatio(),
+			"top_other": append([]ingest.OtherCount{}, sum.TopOther...),
+			"files":     append([]ingest.Result{}, sum.Results...),
+		}
+		for k, v := range counts {
+			summary[k] = v
+		}
+		err = logOperation(ctx, c, "ingest", o, started, err, summary)
+	}()
+	sum, err = ingest.Run(ctx, c, o.positionals, []parser.Parser{evtx.Parser{}})
+	for _, r := range sum.Results {
+		counts[r.Status]++
+		line := fmt.Sprintf("%-9s %s", r.Status, r.File)
+		if r.Status == ingest.Ingested {
+			line += fmt.Sprintf("  events=%d anomalies=%d", r.Events, r.Anomalies)
+		} else {
+			line += "  reason=" + r.Reason
+		}
+		fmt.Fprintln(o.stdout, line)
+	}
+	if err != nil && len(sum.Results) == 0 {
+		return err
+	}
+	fmt.Fprintf(o.stdout, "%d files: %d INGESTED, %d SKIPPED, %d ALTERED, %d FAILED; %d events, %d anomalies\n", len(sum.Results),
+		counts[ingest.Ingested], counts[ingest.Skipped], counts[ingest.Altered], counts[ingest.Failed], sum.Events, sum.Anomalies)
+	if sum.Other > 0 {
+		top := make([]string, len(sum.TopOther))
+		for i, t := range sum.TopOther {
+			top[i] = fmt.Sprintf("%s/%d=%d", t.Channel, t.EventID, t.Count)
+		}
+		fmt.Fprintf(o.stdout, "other: %.1f%% (%d events); top: %s\n", 100*float64(sum.Other)/float64(sum.Events), sum.Other, strings.Join(top, ", "))
+	}
+	switch {
+	case err != nil:
+		return err
+	case counts[ingest.Altered] > 0:
+		return errIntegrity
+	case counts[ingest.Failed] > 0:
+		return errIngestIncomplete
 	}
 	return nil
 }

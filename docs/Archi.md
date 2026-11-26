@@ -1,5 +1,10 @@
 # Architecture Logicielle — DFIRFlow
 
+> Ce document décrit l'architecture **cible**. L'état réel du projet (ce qui est livré, conçu ou
+> prévu), les décisions prises depuis et l'arborescence effective sont tenus à jour dans
+> [architecture-actuelle.md](architecture-actuelle.md). Le modèle d'événement de la section 4 a été
+> remplacé par celui de la spec 003 (`specs/003-event-model/contracts/event-model.md`).
+
 ## 1. Architecture Générale
 
 ```text
