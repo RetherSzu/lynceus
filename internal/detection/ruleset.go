@@ -59,7 +59,9 @@ func Load(path string) (*Ruleset, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		var pe *fs.PathError
-		if errors.As(err, &pe) {
+		if errors.Is(err, fs.ErrNotExist) {
+			err = errors.New("no such file or directory") // texte du contrat, identique sous Windows
+		} else if errors.As(err, &pe) {
 			err = pe.Err
 		}
 		return nil, fmt.Errorf("rules: %s: %w", path, err)
