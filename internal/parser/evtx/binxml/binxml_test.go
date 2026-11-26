@@ -80,10 +80,18 @@ func TestDecodeBaseline(t *testing.T) {
 }
 
 // TestNoExternalDependency : non-régression C12 / E1 (dépendance MPL-2.0).
+// Seule dépendance admise : le lecteur YAML des règles (spec 012, plan, Complexity Tracking).
 func TestNoExternalDependency(t *testing.T) {
+	allowed := map[string]bool{"go.yaml.in/yaml/v3": true}
 	mod := string(load(t, "../../../../go.mod"))
-	if strings.Contains(mod, "require") {
-		t.Fatalf("go.mod declares dependencies:\n%s", mod)
+	for _, l := range strings.Split(mod, "\n") {
+		f := strings.Fields(strings.TrimPrefix(strings.TrimSpace(l), "require"))
+		if strings.HasPrefix(strings.TrimSpace(l), "require (") {
+			t.Fatalf("go.mod uses a require block; expected single require lines:\n%s", mod)
+		}
+		if strings.HasPrefix(strings.TrimSpace(l), "require") && (len(f) == 0 || !allowed[f[0]]) {
+			t.Fatalf("go.mod declares a dependency outside the allow list: %s", l)
+		}
 	}
 	lru := "golang" + "-lru"
 	err := filepath.Walk("../../../..", func(p string, info os.FileInfo, err error) error {

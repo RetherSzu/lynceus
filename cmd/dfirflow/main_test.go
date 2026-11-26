@@ -189,7 +189,6 @@ func TestNotImplemented(t *testing.T) {
 	c := filepath.Join(dir, "cases", "CASE-001")
 	tests := [][]string{
 		{"import", "--case", c, "--tool", "hayabusa", filepath.Join(dir, "out.jsonl")},
-		{"detect", "--case", c, "--rules", filepath.Join(dir, "rules")},
 		{"correlate", "--case", c},
 		{"report", "--case", c, "--format", "html,jsonl"},
 	}
@@ -214,13 +213,13 @@ func TestNotImplemented(t *testing.T) {
 	target := filepath.Join(inv, "target")
 	writeEvidence(t, target, "Security.evtx", string(fixture(t)))
 	code, _, errOut := invoke(context.Background(), "investigate", "--case", filepath.Join(cases, "CASE-001"), "--target", target)
-	if want := "dfirflow: investigate: detect: not implemented yet\n"; code != 3 || errOut != want {
+	if want := "dfirflow: investigate: correlate: not implemented yet\n"; code != 3 || errOut != want {
 		t.Errorf("investigate: code=%d stderr=%q, want 3 and %q", code, errOut, want)
 	}
-	// SC-006 : même chronologie que l'enchaînement manuel sur la même source.
+	// SC-006 (006) et SC-007 (012) : même chronologie et mêmes détections que l'enchaînement manuel.
 	invoke(context.Background(), "case", "init", "CASE-002", "--host", "H", "--analyst", "A", "--dir", cases)
 	manual := filepath.Join(cases, "CASE-002")
-	for _, args := range [][]string{{"collect", "--case", manual, "--target", target}, {"ingest", "--case", manual}, {"timeline", "--case", manual}} {
+	for _, args := range [][]string{{"collect", "--case", manual, "--target", target}, {"ingest", "--case", manual}, {"timeline", "--case", manual}, {"detect", "--case", manual}} {
 		if code, _, errOut := invoke(context.Background(), args...); code != 0 {
 			t.Fatalf("%v: %s", args, errOut)
 		}
@@ -229,6 +228,11 @@ func TestNotImplemented(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(manual, "timeline", "timeline.jsonl"))
 	if err != nil || len(a) == 0 || !bytes.Equal(a, b) {
 		t.Errorf("investigate timeline differs from the manual one (err=%v, %d/%d bytes)", err, len(a), len(b))
+	}
+	a, err = os.ReadFile(filepath.Join(cases, "CASE-001", "detections", "detections.jsonl"))
+	b, _ = os.ReadFile(filepath.Join(manual, "detections", "detections.jsonl"))
+	if err != nil || len(a) == 0 || !bytes.Equal(a, b) {
+		t.Errorf("investigate detections differ from the manual ones (err=%v, %d/%d bytes)", err, len(a), len(b))
 	}
 }
 
@@ -659,5 +663,131 @@ func TestTimelineFilterCommand(t *testing.T) {
 	code, _, _ = invoke(ctx, "timeline", "--case", empty, "--from", "2020-01-01T00:00:00Z", "--to", "2019-01-01T00:00:00Z")
 	if entries, _ := os.ReadDir(filepath.Join(empty, "timeline")); code != 2 || len(entries) != 0 {
 		t.Errorf("from after to: code=%d timeline=%v", code, entries)
+	}
+}
+
+// newDetectCase collects and ingests Security.evtx once (739 events).
+func newDetectCase(t *testing.T) string {
+	t.Helper()
+	c := newIngestCase(t, nil)
+	if code, _, errOut := invoke(context.Background(), "ingest", "--case", c); code != 0 {
+		t.Fatalf("ingest: %s", errOut)
+	}
+	return c
+}
+
+func TestDetectCommand(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newCollectCase(t)
+	code, _, errOut := invoke(ctx, "detect", "--case", c)
+	if code != 1 || !strings.Contains(errOut, "run ingest first") {
+		t.Fatalf("not ingested: code=%d stderr=%q", code, errOut)
+	}
+
+	c = newDetectCase(t)
+	code, out, errOut := invoke(ctx, "detect", "--case", c)
+	if want := "detect: 7 rules applied, 0 skipped, 0 refused, 739 events read, 15 detections: detections/detections.jsonl\n"; code != 0 || out != want || errOut != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	first, _ := os.ReadFile(filepath.Join(c, "detections", "detections.jsonl"))
+	// SC-001 : 1 effacement du journal (1102), 14 modifications de la stratégie d'audit (4719).
+	count := map[string]int{}
+	for _, l := range strings.Split(strings.TrimSpace(string(first)), "\n") {
+		var d struct {
+			RuleID string `json:"rule_id"`
+		}
+		if err := json.Unmarshal([]byte(l), &d); err != nil {
+			t.Fatal(err)
+		}
+		count[d.RuleID]++
+	}
+	if len(count) != 2 || count["8ad87a09-d977-4445-9e5a-962e9023846b"] != 1 || count["16e98cfe-8ffe-44bc-8353-804570a5f7b3"] != 14 {
+		t.Errorf("detections by rule: %v", count)
+	}
+	invoke(ctx, "detect", "--case", c)
+	second, _ := os.ReadFile(filepath.Join(c, "detections", "detections.jsonl"))
+	if len(first) == 0 || !bytes.Equal(first, second) {
+		t.Error("rerun differs")
+	}
+}
+
+func TestDetectLog(t *testing.T) {
+	ctx := context.Background()
+	c := newDetectCase(t)
+	if code, _, errOut := invoke(ctx, "detect", "--case", c); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut)
+	}
+	data, _ := os.ReadFile(filepath.Join(c, "detections", "detections.jsonl"))
+	entry, sum := lastSummary(t, c)
+	if v, _ := sum["ruleset_version"].(string); entry["command"] != "detect" || entry["exit_code"] != 0.0 || sum["rules"] != "embedded" ||
+		len(v) != 16 || sum["rules_applied"] != 7.0 || sum["rules_skipped"] != 0.0 || sum["files"] != 1.0 ||
+		sum["events_read"] != 739.0 || sum["detections"] != 15.0 || sum["sha256"] != sha(string(data)) ||
+		sum["rules_refused"] != nil || sum["unknown_files"] != nil || sum["error"] != nil {
+		t.Fatalf("journal = %v", entry)
+	}
+
+	// Échec : ligne refusée.
+	bad := filepath.Join(c, "normalized", filepath.FromSlash(securityEvidence)+".jsonl")
+	os.WriteFile(bad, []byte("{}\n"), 0o644)
+	if code, _, errOut := invoke(ctx, "detect", "--case", c); code != 1 || !strings.Contains(errOut, "line 1") {
+		t.Fatalf("bad line: code=%d stderr=%q", code, errOut)
+	}
+	entry, sum = lastSummary(t, c)
+	if entry["exit_code"] != 1.0 || sum["sha256"] != nil || sum["error"] == nil {
+		t.Fatalf("failure journal = %v", entry)
+	}
+	if after, _ := os.ReadFile(filepath.Join(c, "detections", "detections.jsonl")); !bytes.Equal(after, data) {
+		t.Error("previous detections changed")
+	}
+}
+
+func TestDetectHelp(t *testing.T) {
+	code, out, _ := invoke(context.Background(), "detect", "--help")
+	if code != 0 || !strings.Contains(out, "not proof of compromise") {
+		t.Fatalf("code=%d help=%q", code, out)
+	}
+}
+
+func TestDetectRulesCommand(t *testing.T) {
+	ctx := context.Background()
+	c := newDetectCase(t)
+	rules := t.TempDir()
+	cleared, err := os.ReadFile("../../internal/detection/rules/security_log_cleared.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(rules, "security_log_cleared.yml"), cleared, 0o644)
+	os.WriteFile(filepath.Join(rules, "agg.yml"), []byte("title: agg\nid: x-agg\nlevel: low\nlogsource: {product: windows, service: security}\ndetection:\n  sel: {EventID: 4625}\n  condition: sel | count() > 5\n"), 0o644)
+	os.WriteFile(filepath.Join(rules, "linux.yml"), []byte("title: lin\nid: x-lin\nlevel: low\nlogsource: {product: linux, service: auth}\ndetection:\n  sel: {a: b}\n  condition: sel\n"), 0o644)
+
+	code, out, errOut := invoke(ctx, "detect", "--case", c, "--rules", rules)
+	agg := filepath.Join(rules, "agg.yml")
+	if code != 0 || out != "detect: 1 rules applied, 1 skipped, 1 refused, 739 events read, 1 detections: detections/detections.jsonl\n" ||
+		errOut != "dfirflow: detect: warning: rule refused: "+agg+": aggregation is not supported\n" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	_, sum := lastSummary(t, c)
+	refused, _ := sum["rules_refused"].([]interface{})
+	if sum["rules"] != rules || len(refused) != 1 || refused[0].(map[string]interface{})["file"] != agg ||
+		refused[0].(map[string]interface{})["reason"] != "aggregation is not supported" {
+		t.Fatalf("journal = %v", sum)
+	}
+	prev, _ := os.ReadFile(filepath.Join(c, "detections", "detections.jsonl"))
+
+	// Chemin introuvable, puis doublon d'identifiant : code 1, fichier précédent intact.
+	missing := filepath.Join(rules, "absent")
+	if code, _, errOut := invoke(ctx, "detect", "--case", c, "--rules", missing); code != 1 || errOut != "dfirflow: detect: rules: "+missing+": no such file or directory\n" {
+		t.Errorf("missing: code=%d stderr=%q", code, errOut)
+	}
+	os.WriteFile(filepath.Join(rules, "copy.yml"), cleared, 0o644)
+	if code, _, errOut := invoke(ctx, "detect", "--case", c, "--rules", rules); code != 1 || !strings.Contains(errOut, "duplicate rule id 8ad87a09-d977-4445-9e5a-962e9023846b") {
+		t.Errorf("duplicate: code=%d stderr=%q", code, errOut)
+	}
+	_, sum = lastSummary(t, c)
+	if sum["ruleset_version"] != nil || sum["error"] == nil {
+		t.Errorf("duplicate journal = %v", sum)
+	}
+	if after, _ := os.ReadFile(filepath.Join(c, "detections", "detections.jsonl")); !bytes.Equal(after, prev) {
+		t.Error("previous detections changed")
 	}
 }

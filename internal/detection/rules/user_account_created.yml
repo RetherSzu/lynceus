@@ -1,0 +1,19 @@
+title: Local or domain user account created
+id: 92be069d-0b8f-4ecd-a4c3-236eb494fa35
+status: test
+description: A user account was created.
+author: DFIRFlow
+license: Apache-2.0
+tags:
+    - attack.persistence
+    - attack.t1136.001
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID: 4720
+    condition: selection
+falsepositives:
+    - Account provisioning by administrators
+level: medium

@@ -1,0 +1,20 @@
+title: System event log cleared
+id: 7f021602-7eb2-46cc-bd9c-8791ff6b80c6
+status: stable
+description: An event log was cleared, as reported in the System log (event 104).
+author: DFIRFlow
+license: Apache-2.0
+tags:
+    - attack.defense-evasion
+    - attack.t1070.001
+logsource:
+    product: windows
+    service: system
+detection:
+    selection:
+        EventID: 104
+        Provider_Name: Microsoft-Windows-Eventlog
+    condition: selection
+falsepositives:
+    - Planned log maintenance
+level: high

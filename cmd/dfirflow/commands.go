@@ -12,6 +12,7 @@ import (
 
 	casefile "DFIRFlow/internal/case"
 	"DFIRFlow/internal/collector"
+	"DFIRFlow/internal/detection"
 	"DFIRFlow/internal/ingest"
 	"DFIRFlow/internal/normalizer"
 	"DFIRFlow/internal/parser"
@@ -99,10 +100,11 @@ func init() {
 			},
 			check: checkTimeline, exec: timelineCmd,
 			example: "dfirflow timeline --case ./cases/CASE-001 --from 2026-11-01T00:00:00Z --source evtx,prefetch"},
-		{name: "detect", summary: "Apply detection rules to normalized events",
+		{name: "detect", summary: "Apply detection rules to normalized events (detections are leads to examine, not proof of compromise)",
 			options: []option{optCase,
-				{"rules", "<path>", "rules file or directory", false, func(o *opts) *onceString { return &o.rules }},
+				{"rules", "<path>", "rules file or directory (default: embedded rules)", false, func(o *opts) *onceString { return &o.rules }},
 			},
+			exec:    detectCmd,
 			example: "dfirflow detect --case ./cases/CASE-001 --rules ./rules"},
 		{name: "correlate", summary: "Reconstruct attack chains from detections",
 			options: []option{optCase},
@@ -506,6 +508,65 @@ func timelineCmd(ctx context.Context, o *opts) (err error) {
 		return err
 	}
 	_, err = fmt.Fprintf(o.stdout, "timeline: %d files, %d events read, %d written: timeline/timeline.jsonl\n", sum.Files, sum.EventsRead, sum.EventsWritten)
+	return err
+}
+
+// detectCmd écrit detections/detections.jsonl (contracts/detect.md).
+func detectCmd(ctx context.Context, o *opts) (err error) {
+	started := time.Now()
+	c, err := casefile.Open(o.caseDir.value)
+	if err != nil {
+		return err
+	}
+	source := detection.Embedded
+	if o.rules.set {
+		source = o.rules.value
+	}
+	var rs *detection.Ruleset
+	var sum detection.Summary
+	defer func() {
+		summary := map[string]interface{}{"rules": source}
+		if rs != nil {
+			summary["rules_applied"], summary["rules_skipped"] = len(rs.Applied), rs.Skipped
+			if rs.Version != "" {
+				summary["ruleset_version"] = rs.Version
+			}
+			if len(rs.Refused) > 0 {
+				summary["rules_refused"] = rs.Refused
+			}
+		}
+		if sum.Files > 0 || sum.EventsRead > 0 {
+			summary["files"], summary["events_read"], summary["detections"] = sum.Files, sum.EventsRead, sum.Detections
+		}
+		if sum.SHA256 != "" {
+			summary["sha256"] = sum.SHA256
+		}
+		if len(sum.UnknownFiles) > 0 {
+			summary["unknown_files"] = sum.UnknownFiles
+		}
+		if err != nil {
+			summary["error"] = err.Error()
+		}
+		err = logOperation(ctx, c, "detect", o, started, err, summary)
+	}()
+	rs, err = detection.Load(o.rules.value)
+	if rs != nil {
+		for _, r := range rs.Refused {
+			fmt.Fprintf(o.stderr, "dfirflow: detect: warning: rule refused: %s: %s\n", r.File, r.Reason)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	sum, err = detection.Run(ctx, c, rs)
+	for _, u := range sum.UnknownFiles {
+		fmt.Fprintf(o.stderr, "dfirflow: detect: warning: not in the case manifest: %s\n", u)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(o.stdout, "detect: %d rules applied, %d skipped, %d refused, %d events read, %d detections: detections/detections.jsonl\n",
+		len(rs.Applied), rs.Skipped, len(rs.Refused), sum.EventsRead, sum.Detections)
 	return err
 }
 

@@ -1,0 +1,20 @@
+title: Service installed
+id: 937be0a0-b743-4102-83e6-25f8c5eed60b
+status: test
+description: A new service was installed in the system.
+author: DFIRFlow
+license: Apache-2.0
+tags:
+    - attack.persistence
+    - attack.t1543.003
+logsource:
+    product: windows
+    service: system
+detection:
+    selection:
+        EventID: 7045
+        Provider_Name: Service Control Manager
+    condition: selection
+falsepositives:
+    - Software installation
+level: medium

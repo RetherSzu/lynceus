@@ -1,0 +1,20 @@
+title: Scheduled task created
+id: 5f1c65f2-02d2-4919-abcd-8f4b6066b681
+status: test
+description: A scheduled task was created.
+author: DFIRFlow
+license: Apache-2.0
+tags:
+    - attack.persistence
+    - attack.execution
+    - attack.t1053.005
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID: 4698
+    condition: selection
+falsepositives:
+    - Software installation and updates
+level: medium

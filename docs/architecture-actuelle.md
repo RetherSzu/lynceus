@@ -1,4 +1,4 @@
-# Architecture de DFIRFlow — état au 2026-11-25
+# Architecture de DFIRFlow — état au 2026-11-26
 
 Ce document décrit le projet **tel qu'il est aujourd'hui** : ce qui est livré, ce qui est conçu
 mais pas encore codé, et ce qui reste prévu. Il complète [Archi.md](Archi.md), qui décrit la
@@ -14,7 +14,7 @@ pas encore codé) · **Prévu** (pas encore spécifié).
 
 ## 1. Vue d'ensemble
 
-DFIRFlow est un binaire Go unique, sans dépendance externe, qui fonctionne hors ligne sur une
+DFIRFlow est un binaire Go unique, sans runtime externe, qui fonctionne hors ligne sur une
 station d'analyse Windows ou Linux. Il prend en entrée des artefacts Windows (journaux EVTX, $MFT,
 registre…) et produit une chronologie, des détections et un rapport, en garantissant la chaîne de
 preuve.
@@ -46,7 +46,7 @@ preuve.
                                   │
               ┌───────────────────┼────────────────────┐
               ▼                   ▼                    ▼
-     timeline/ (006, codé)   detections/ (012, prévu)  corrélation (prévu)
+     timeline/ (006, livré)  detections/ (012, codé)   corrélation (prévu)
               └───────────────────┼────────────────────┘
                                   ▼
                      reports/ : HTML, SQLite, JSONL (prévu)
@@ -66,8 +66,9 @@ arguments et appelle les packages internes.
 | 003 | Modèle `Event`, `Detection`, contrat `Parser`, JSONL canonique | Livré |
 | 004 | `collect` : copie des journaux EVTX dans le cas, métadonnées d'origine | Livré |
 | 005 | Parser EVTX natif (fork interne, ADR-002) + `ingest` | Livré |
-| 006 | `timeline` | Codé |
-| 007–012 | USN, registre, $MFT, Prefetch, importers, détection | Prévu |
+| 006 | `timeline` | Livré |
+| 007–011 | USN, registre, $MFT, Prefetch, importers | Prévu |
+| 012 | `detect` : règles Sigma mono-événement, jeu embarqué | Codé |
 
 ---
 
@@ -116,14 +117,23 @@ internal/
 │       ├── mapping.go        chargement et application de la table
 │       └── mapping.json      table de correspondance EVTX (données)
 ├── ingest/                Livré (spec 005) : intégrité, choix du parser, écriture de normalized/
-└── timeline/              Codé (spec 006) : sélection, filtres, tri externe, écriture atomique
+│   └── files.go              EventFiles : fichiers d'événements des preuves du manifeste (012)
+├── extsort/               Codé (spec 012, extrait de 006) : tri externe borné, écriture atomique
+├── timeline/              Livré (spec 006) : filtres, clé canonique ; s'appuie sur extsort
+└── detection/             Codé (spec 012) : règles Sigma, condition, jeu embarqué, détections
+    ├── rule.go, match.go, condition.go   chargement, sélections et modificateurs, condition
+    ├── ruleset.go            jeu embarqué ou --rules, refus, doublons, version du jeu
+    └── rules/*.yml           jeu embarqué (7 règles, Apache-2.0)
 specs/NNN-*/                  spec, plan, recherche, contrats, tâches de chaque fonctionnalité
 docs/adr/                     décisions d'architecture
 .specify/memory/constitution.md   9 principes non négociables
 ```
 
-Dépendances : **bibliothèque standard Go uniquement** (constitution, principes I et VII). Le code
-d'origine Velocidex est intégré au dépôt, ce n'est pas une dépendance de module.
+Dépendances : bibliothèque standard Go, plus **une seule dépendance de module**,
+`go.yaml.in/yaml/v3` v3.0.6 (MIT et Apache-2.0, sans dépendance transitive), pour lire les règles
+YAML (spec 012, plan, *Complexity Tracking*). `TestNoExternalDependency` refuse toute autre
+dépendance. Le code d'origine Velocidex est intégré au dépôt, ce n'est pas une dépendance de
+module.
 
 Le dossier `spikes/` (code jetable des études) est ignoré par git.
 
@@ -138,11 +148,11 @@ Le dossier `spikes/` (code jetable des études) est ignoré par git.
 | `collect --case --target` | copie les journaux EVTX d'un volume dans le cas | Livré (004) |
 | `ingest --case [chemins…]` | décode les preuves vers `normalized/` | Livré (005) |
 | `import --case --tool <outil> <chemin>` | lit les sorties d'un outil tiers | Prévu (011) |
-| `timeline --case [--from --to --source]` | chronologie filtrée vers `timeline/timeline.jsonl` | Codé (006) |
-| `detect --case [--rules]` | applique les règles | Prévu (012) |
+| `timeline --case [--from --to --source]` | chronologie filtrée vers `timeline/timeline.jsonl` | Livré (006) |
+| `detect --case [--rules]` | applique les règles (jeu embarqué par défaut) vers `detections/detections.jsonl` | Codé (012) |
 | `correlate --case` | reconstitue les chaînes d'attaque | Prévu |
 | `report --case --format html,sqlite,jsonl` | produit les livrables | Prévu |
-| `investigate --case --target` | enchaîne les étapes, sans logique propre ; collecte, ingère, construit la chronologie, puis s'arrête à `detect` | Partiel |
+| `investigate --case --target` | enchaîne les étapes, sans logique propre ; collecte, ingère, construit la chronologie, détecte, puis s'arrête à `correlate` | Partiel |
 
 Les commandes non livrées répondent « not implemented yet », avec le code 3.
 
@@ -168,7 +178,7 @@ Les commandes non livrées répondent « not implemented yet », avec le code 3.
 - Résumé : statut par preuve, nombres d'événements et d'anomalies, part des événements `other` et
   les dix (canal, EventID) non classés les plus fréquents.
 
-### `timeline` (spec 006, codé)
+### `timeline` (spec 006, livré)
 
 - Lit `normalized/<preuve>.jsonl` des seules preuves du manifeste ; les anomalies et les fichiers
   `.partial` ne sont jamais lus ; un fichier sans preuve au manifeste est signalé.
@@ -176,6 +186,16 @@ Les commandes non livrées répondent « not implemented yet », avec le code 3.
   `--source` ; chaque événement apparaît une seule fois, à son horodatage principal.
 - Écrit `timeline/timeline.jsonl` dans l'ordre canonique ; la précédente n'est remplacée qu'une fois
   la nouvelle complète ; l'entrée `case.log` porte les filtres, les compteurs et le SHA-256.
+
+### `detect` (spec 012, codé)
+
+- Lit les mêmes fichiers d'événements que `timeline` (tous les événements, sans les filtres de la
+  chronologie) et applique le jeu embarqué, ou à la place les règles de `--rules`.
+- Une détection par couple (règle, événement) ; `detections/detections.jsonl` trié par `timestamp`
+  puis `id`, écrit de façon atomique ; une détection est une piste, pas une preuve de compromission.
+- Une règle hors du sous-ensemble Sigma est refusée avec sa raison ; une règle d'un autre produit
+  que Windows est écartée et comptée ; l'entrée `case.log` porte l'origine et la version du jeu de
+  règles, les refus, les compteurs et le SHA-256.
 
 ---
 
@@ -188,8 +208,8 @@ Les commandes non livrées répondent « not implemented yet », avec le code 3.
 ├── evidence/              copies des preuves, en lecture seule (alimenté par collect)
 ├── parsed/                réservé, non utilisé
 ├── normalized/            événements et anomalies JSONL (005, livré)
-├── timeline/              timeline.jsonl, chronologie JSONL (006, codé)
-├── detections/            détections JSONL (012, prévu)
+├── timeline/              timeline.jsonl, chronologie JSONL (006, livré)
+├── detections/            detections.jsonl, détections JSONL (012, codé)
 ├── reports/               HTML / SQLite / JSONL (prévu)
 └── hashes/manifest.jsonl  empreinte et origine de chaque preuve (ajout seul)
 ```
@@ -313,9 +333,9 @@ manifest.jsonl {file, sha256} ──┴─▶ Source ──▶ Parser.Parse(ctx,
            ├─ valide   ─▶ consommateur ─▶ Encoder ─▶ normalized/*.jsonl
            └─ invalide ─▶ Anomaly{kind: invalid}  (jamais ignoré en silence)
 
-normalized/*.jsonl ─▶ ReadEvents ─▶ filtre ─▶ tri externe ─▶ timeline/timeline.jsonl (006) ─▶ règles (012)
-                                                         │
-                                         Detection{events: [uid…]} ─▶ detections/*.jsonl
+normalized/*.jsonl ─▶ ReadEvents ─▶ filtre ─▶ tri externe ─▶ timeline/timeline.jsonl (006)
+normalized/*.jsonl ─▶ ReadEvents ─▶ règles du canal (012) ─▶ Detection{events: [uid]} ─▶ tri externe
+                                                         ─▶ detections/detections.jsonl
 ```
 
 ### 7.3 Les identifiants : qui pointe vers quoi
@@ -369,7 +389,7 @@ normalized/…/Security.evtx.jsonl   +   normalized/…/Security.evtx.anomalies.
 
 ---
 
-## 9. Chronologie (spec 006, codé)
+## 9. Chronologie (spec 006, livré)
 
 ```text
 manifeste ─▶ normalized/<preuve>.jsonl (preuves du manifeste, dans l'ordre du manifeste)
@@ -387,26 +407,55 @@ timeline/timeline.jsonl.partial ─▶ SHA-256 au fil de l'écriture ─▶ reno
   restent dans le cas et sont supprimés en succès, en échec ou à l'interruption.
 - **Une seule chronologie par cas**, remplacée à chaque exécution ; les filtres de chaque version
   sont dans `case.log`.
+- Le tri externe et l'écriture atomique sont dans `internal/extsort`, partagés avec `detect`.
 
 ---
 
-## 10. Principes qui contraignent l'architecture
+## 10. Détection (spec 012, codé)
+
+```text
+jeu embarqué (rules/*.yml) ou --rules (fichier, ou .yml/.yaml d'un dossier, hors fichiers cachés)
+        │  parseRule : produit windows sinon écartée ; champs, niveau, statut, confiance ;
+        │  service → canal ; sélections et modificateurs ; condition (64 niveaux au plus)
+        ▼  refus motivés · doublons d'id parmi les règles appliquées → échec · version du jeu
+index par canal ─▶ normalized/<preuve>.jsonl ─▶ événements EVTX évalués par les règles de leur canal
+        ▼
+Detection (spec 003) ─▶ tri externe (timestamp, id) ─▶ detections/detections.jsonl
+```
+
+- **Sous-ensemble Sigma** : sélections (table = ET, liste de tables = OU), valeurs multiples,
+  jokers `*` et `?`, `contains`, `startswith`, `endswith`, `all`, `re` et `re|i`, `null` ;
+  condition `and`, `or`, `not`, parenthèses, `1 of`, `all of`, `them`. Agrégations, `timeframe`,
+  mots-clés et sources par catégorie sont refusés (relèvent de `correlate` ou d'une évolution).
+- **Champs** : `EventID`, `Channel`, `Provider_Name`, `Computer`, puis les données de l'événement
+  conservées par `ingest` (`metadata`) ; jamais un message rendu.
+- **Versions** : `rule_version` = empreinte du fichier de la règle (fins de ligne ramenées à LF) ;
+  version du jeu = empreinte des couples (id, version) triés, dans `case.log`.
+- **Confiance** : déclarée par la règle, sinon 0,8 / 0,6 / 0,4 selon `stable` / `test` /
+  `experimental` ; `mitre` = première technique ATT&CK des étiquettes (identifiant seul).
+- **Jeu embarqué** (7 règles) : effacement des journaux Security et System, stratégie d'audit,
+  création de compte, ajout à un groupe privilégié (par SID), installation de service, tâche
+  planifiée ; chacune a un cas positif et un cas négatif testés.
+
+---
+
+## 11. Principes qui contraignent l'architecture
 
 | Principe | Effet concret |
 |---|---|
-| I. Binaire autonome | Go, bibliothèque standard uniquement, hors ligne ; code tiers intégré au dépôt plutôt qu'en dépendance |
+| I. Binaire autonome | Go, bibliothèque standard et une dépendance YAML en Go pur, hors ligne ; code tiers intégré au dépôt plutôt qu'en dépendance ; règles embarquées |
 | II. Natif d'abord | `import` lit les sorties d'outils tiers, ne les exécute jamais |
 | III. Chaîne de preuve | manifeste SHA-256 et origine, preuves en lecture seule, empreinte vérifiée avant ingestion, `uid` dérivé de l'empreinte |
 | IV. Reproductibilité | sorties identiques à l'octet, tri total, UTC, table de correspondance versionnée |
 | V. Flux | lecture par `ReaderAt` et rappels ; anomalies obligatoires, aucune perte silencieuse |
 | VI. Tests d'abord | tests et fichiers de référence avant le code ; oracles (evtx_dump, EvtxECmd) |
 | VII. Licences | Apache-2.0 / MIT / BSD seulement ; projet sous Apache-2.0 ; dépendance MPL-2.0 de Velocidex retirée |
-| VIII. Détection | règles déterministes, sans apprentissage automatique |
+| VIII. Détection | règles Sigma déterministes et versionnées, champs structurés, sans apprentissage automatique ; une détection est une piste |
 | IX. Windows-first | artefacts Windows ; rendu des valeurs aligné sur la vue XML Windows ; code propre à une plateforme isolé par build tags |
 
 ---
 
-## 11. Points ouverts
+## 12. Points ouverts
 
 - **Taxonomie des événements** : la liste fermée de la spec 003 compte dix types. Son
   élargissement (deux niveaux catégorie / type, alignés sur ECS ou OCSF) demandera une spec qui
@@ -414,7 +463,11 @@ timeline/timeline.jsonl.partial ─▶ SHA-256 au fil de l'écriture ─▶ reno
 - **Oracle EvtxECmd** : nécessite un environnement .NET ; ses sorties de référence seront produites
   hors CI (spec 005).
 - **Collecte live** (DF-13) et **décodage parallèle** (DF-18) : reportés (cycles ultérieurs).
-- **Exécutions simultanées sur un même cas** : non gérées (pas de verrou de cas) ; `ingest` et
-  `timeline` supposent une seule commande à la fois.
+- **Exécutions simultanées sur un même cas** : non gérées (pas de verrou de cas) ; `ingest`,
+  `timeline` et `detect` supposent une seule commande à la fois.
 - **Récupération d'enregistrements EVTX supprimés** (espace libre des chunks, constat C13) : non
   planifiée.
+- **Titres et tactiques ATT&CK** : seul l'identifiant de technique est conservé ; un référentiel
+  embarqué (titres, tactiques, version d'ATT&CK) est prévu avec `report` ou `correlate`.
+- **Sources Sigma par catégorie** (`process_creation`…) et champs pivots dans les règles : non
+  pris en charge ; une grande partie du corpus SigmaHQ est refusée avec la raison.
