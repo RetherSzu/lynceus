@@ -246,3 +246,36 @@ func TestOtherSummary(t *testing.T) {
 		t.Fatalf("ratio %s", sum.OtherRatio())
 	}
 }
+
+func TestEventFiles(t *testing.T) {
+	c := newCase(t)
+	sys := logs + "System.evtx"
+	for _, rel := range []string{security, sys, "y.anomalies"} {
+		add(t, c, rel, []byte(rel))
+	}
+	for rel, data := range map[string]string{
+		security + ".jsonl":           "",
+		security + ".anomalies.jsonl": "",
+		security + ".jsonl.partial":   "",
+		"y.anomalies.jsonl":           "",
+		"old/x.evtx.jsonl":            "",
+		"old/x.evtx.anomalies.jsonl":  "",
+	} {
+		p := normalized(c, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, unknown, err := EventFiles(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// System.evtx sans fichier d'événements est absente ; y.anomalies est une preuve.
+	if got, want := strings.Join(files, ","), "normalized/"+security+".jsonl,normalized/y.anomalies.jsonl"; got != want {
+		t.Errorf("files %s, want %s", got, want)
+	}
+	if got, want := strings.Join(unknown, ","), "normalized/old/x.evtx.anomalies.jsonl,normalized/old/x.evtx.jsonl"; got != want {
+		t.Errorf("unknown %s, want %s", got, want)
+	}
+}

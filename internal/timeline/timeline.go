@@ -6,19 +6,16 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	casefile "DFIRFlow/internal/case"
+	"DFIRFlow/internal/extsort"
+	"DFIRFlow/internal/ingest"
 	"DFIRFlow/internal/normalizer"
 )
 
@@ -44,28 +41,11 @@ type Summary struct {
 func Run(ctx context.Context, c *casefile.Case, f Filter) (sum Summary, err error) {
 	dir := c.Dir("timeline")
 	out := filepath.Join(dir, "timeline.jsonl")
-	// shortcut: suppose une seule exécution de timeline à la fois sur le cas, à revoir avec un verrou de cas.
-	os.Remove(out + ".partial")
-	if olds, _ := filepath.Glob(filepath.Join(dir, ".work-*")); olds != nil {
-		for _, o := range olds {
-			os.RemoveAll(o)
-		}
-	}
+	extsort.CleanStale(dir, "timeline.jsonl")
 
-	entries, err := c.Evidence()
+	files, unknown, err := ingest.EventFiles(c)
+	sum.UnknownFiles = unknown
 	if err != nil {
-		return sum, err
-	}
-	known := map[string]bool{}
-	var files []string
-	for _, e := range entries {
-		rel := "normalized/" + e.File + ".jsonl"
-		known[rel], known["normalized/"+e.File+".anomalies.jsonl"] = true, true
-		if _, err := os.Stat(filepath.Join(c.BaseDir, filepath.FromSlash(rel))); err == nil {
-			files = append(files, rel)
-		}
-	}
-	if sum.UnknownFiles, err = unknownFiles(c.BaseDir, known); err != nil {
 		return sum, err
 	}
 	if len(files) == 0 {
@@ -78,8 +58,8 @@ func Run(ctx context.Context, c *casefile.Case, f Filter) (sum Summary, err erro
 	}
 	from, to := f.From.Truncate(time.Microsecond), f.To.Truncate(time.Microsecond)
 	seen := map[string]bool{}
-	s := &sorter{ctx: ctx, parent: dir}
-	defer s.cleanup()
+	s := &extsort.Sorter{Ctx: ctx, Parent: dir, Decode: decodeKey}
+	defer s.Cleanup()
 	var line bytes.Buffer
 	enc := normalizer.NewEncoder(&line)
 	for _, rel := range files {
@@ -102,7 +82,7 @@ func Run(ctx context.Context, c *casefile.Case, f Filter) (sum Summary, err erro
 				return err
 			}
 			sum.EventsWritten++
-			return s.add(keyOf(ev), append([]byte(nil), line.Bytes()...))
+			return s.Add(keyOf(ev), append([]byte(nil), line.Bytes()...))
 		})
 		in.Close()
 		if err != nil {
@@ -120,56 +100,6 @@ func Run(ctx context.Context, c *casefile.Case, f Filter) (sum Summary, err erro
 	}
 	sort.Strings(sum.MissingSources)
 
-	sum.SHA256, err = writeAtomic(out, s.finish)
+	sum.SHA256, err = extsort.WriteAtomic(out, s.Finish)
 	return sum, err
-}
-
-// writeAtomic écrit out.partial via write, puis le renomme en out ;
-// le .partial est supprimé sur toute erreur.
-func writeAtomic(out string, write func(io.Writer) error) (string, error) {
-	tmp := out + ".partial"
-	fh, err := os.Create(tmp)
-	if err != nil {
-		return "", err
-	}
-	h := sha256.New()
-	bw := bufio.NewWriterSize(io.MultiWriter(fh, h), 1<<16)
-	err = write(bw)
-	if err == nil {
-		err = bw.Flush()
-	}
-	if err == nil {
-		err = fh.Sync()
-	}
-	if cerr := fh.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Rename(tmp, out)
-	}
-	if err != nil {
-		os.Remove(tmp)
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-// unknownFiles liste les fichiers de normalized/ sans preuve au manifeste (FR-002).
-func unknownFiles(base string, known map[string]bool) ([]string, error) {
-	var out []string
-	err := filepath.WalkDir(filepath.Join(base, "normalized"), func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || strings.HasSuffix(p, ".partial") {
-			return err
-		}
-		rel, err := filepath.Rel(base, p)
-		if err != nil {
-			return err
-		}
-		if rel = filepath.ToSlash(rel); !known[rel] {
-			out = append(out, rel)
-		}
-		return nil
-	})
-	sort.Strings(out)
-	return out, err
 }

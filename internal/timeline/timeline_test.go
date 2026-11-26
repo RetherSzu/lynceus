@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	casefile "DFIRFlow/internal/case"
+	"DFIRFlow/internal/extsort"
 	"DFIRFlow/internal/normalizer"
 )
 
@@ -142,11 +144,11 @@ func TestRunAll(t *testing.T) {
 func TestRunDeterministic(t *testing.T) {
 	c, _ := twoFiles(t)
 	var runs [][]byte
-	for _, budget := range []int{segmentBudget, segmentBudget, 4 << 10} {
-		old := segmentBudget
-		segmentBudget = budget
+	for _, budget := range []int{extsort.SegmentBudget, extsort.SegmentBudget, 4 << 10} {
+		old := extsort.SegmentBudget
+		extsort.SegmentBudget = budget
 		_, err := Run(context.Background(), c, Filter{})
-		segmentBudget = old
+		extsort.SegmentBudget = old
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -231,8 +233,8 @@ func TestRunCanceled(t *testing.T) {
 		t.Fatal(err)
 	}
 	prev := readTimeline(t, c)
-	defer func(b int) { segmentBudget = b }(segmentBudget)
-	segmentBudget = 4 << 10
+	defer func(b int) { extsort.SegmentBudget = b }(extsort.SegmentBudget)
+	extsort.SegmentBudget = 4 << 10
 	for _, n := range []int{10, 700} { // pendant la lecture, puis pendant la fusion
 		_, err := Run(&cancelAfter{context.Background(), n}, c, Filter{})
 		if !errors.Is(err, context.Canceled) {
@@ -382,20 +384,24 @@ func TestRunLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	cur := &cursor{r: bufio.NewReaderSize(f, 1<<20)}
-	n, prev := 0, key{}
+	r2 := bufio.NewReaderSize(f, 1<<20)
+	n, prev := 0, extsort.Key{}
 	for {
-		ok, err := cur.next()
+		line, err := r2.ReadBytes('\n')
+		if len(line) == 0 && err == io.EOF {
+			break
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !ok {
-			break
+		k, err := decodeKey(line)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if n > 0 && !less(prev, cur.e.k) {
+		if n > 0 && !extsort.Less(prev, k) {
 			t.Fatalf("line %d out of order", n+1)
 		}
-		prev, n = cur.e.k, n+1
+		prev, n = k, n+1
 	}
 	if n != total {
 		t.Fatalf("%d lines, want %d", n, total)

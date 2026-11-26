@@ -1,0 +1,19 @@
+title: System audit policy changed
+id: 16e98cfe-8ffe-44bc-8353-804570a5f7b3
+status: test
+description: The system audit policy was changed, which can disable the logging of later activity.
+author: DFIRFlow
+license: Apache-2.0
+tags:
+    - attack.defense-evasion
+    - attack.t1562.002
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID: 4719
+    condition: selection
+falsepositives:
+    - Administrative or group policy changes
+level: medium
