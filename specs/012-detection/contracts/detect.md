@@ -56,6 +56,10 @@ Raisons de refus (texte exact) :
 | imbrication au-delà de 64 niveaux | `invalid condition: too deeply nested` |
 | sélection qui n'est ni une table ni une liste de tables, valeur non scalaire, champ sans valeur | `invalid selection <nom>: ...` |
 
+Raisons modifiées par la spec 013 : `logsource category is not supported` retirée, `missing
+logsource.service` remplacée par `missing logsource.service or logsource.category` (voir
+`specs/013-sigma-categories/contracts/detect.md`).
+
 Erreurs (code 1) :
 
 ```text
