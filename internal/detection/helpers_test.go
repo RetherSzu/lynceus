@@ -50,3 +50,14 @@ func mustRule(t *testing.T, src string) *Rule {
 	}
 	return r
 }
+
+// catRule renvoie rule(det) dont la source est logsource (lignes indentées de
+// deux espaces, par exemple "  category: process_creation\n").
+func catRule(logsource, det string) string {
+	return strings.Replace(rule("", det), "  service: security\n", logsource, 1)
+}
+
+const (
+	sysmonCh = "Microsoft-Windows-Sysmon/Operational"
+	psCh     = "Microsoft-Windows-PowerShell/Operational"
+)

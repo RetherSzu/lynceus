@@ -1,0 +1,26 @@
+title: PowerShell encoded command
+id: 94b506b2-9a79-4e99-9e7c-8de7ec0280c5
+status: test
+description: PowerShell was started with an encoded command line, a common way to hide the script it runs.
+author: DFIRFlow
+license: Apache-2.0
+tags:
+    - attack.execution
+    - attack.t1059.001
+logsource:
+    product: windows
+    category: process_creation
+detection:
+    selection_image:
+        Image|endswith:
+            - '\powershell.exe'
+            - '\pwsh.exe'
+    selection_cli:
+        CommandLine|windash|contains:
+            - ' -enc'
+            - ' -encodedcommand'
+            - ' -ec '
+    condition: all of selection_*
+falsepositives:
+    - Administration scripts and management agents that pass encoded commands
+level: medium

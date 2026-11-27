@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	casefile "DFIRFlow/internal/case"
@@ -61,27 +60,30 @@ func Run(ctx context.Context, c *casefile.Case, rs *Ruleset) (sum Summary, err e
 			if ev.Source != normalizer.SourceEVTX {
 				return nil
 			}
-			for _, r := range rs.byChannel[strings.ToLower(ev.Channel)] {
-				if !r.match(&ev) {
-					continue
-				}
-				d := normalizer.Detection{
-					ID:          normalizer.DetectionID(r.ID, r.Version, []string{ev.UID}),
-					Timestamp:   ev.Timestamp,
-					RuleID:      r.ID,
-					RuleVersion: r.Version,
-					Severity:    r.Severity,
-					Confidence:  r.Confidence,
-					MITRE:       r.MITRE,
-					Events:      []string{ev.UID},
-				}
-				line.Reset()
-				if err := enc.Detection(d); err != nil {
-					return err
-				}
-				sum.Detections++
-				if err := s.Add(keyOf(d), append([]byte(nil), line.Bytes()...)); err != nil {
-					return err
+			for _, list := range rs.candidates(&ev) {
+				for _, e := range list {
+					if !e.src.accepts(&ev) || !e.rule.match(&ev, e.src) {
+						continue
+					}
+					r := e.rule
+					d := normalizer.Detection{
+						ID:          normalizer.DetectionID(r.ID, r.Version, []string{ev.UID}),
+						Timestamp:   ev.Timestamp,
+						RuleID:      r.ID,
+						RuleVersion: r.Version,
+						Severity:    r.Severity,
+						Confidence:  r.Confidence,
+						MITRE:       r.MITRE,
+						Events:      []string{ev.UID},
+					}
+					line.Reset()
+					if err := enc.Detection(d); err != nil {
+						return err
+					}
+					sum.Detections++
+					if err := s.Add(keyOf(d), append([]byte(nil), line.Bytes()...)); err != nil {
+						return err
+					}
 				}
 			}
 			return nil

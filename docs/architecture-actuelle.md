@@ -1,4 +1,4 @@
-# Architecture de DFIRFlow — état au 2026-11-26
+# Architecture de DFIRFlow — état au 2026-11-27
 
 Ce document décrit le projet **tel qu'il est aujourd'hui** : ce qui est livré, ce qui est conçu
 mais pas encore codé, et ce qui reste prévu. Il complète [Archi.md](Archi.md), qui décrit la
@@ -46,7 +46,7 @@ preuve.
                                   │
               ┌───────────────────┼────────────────────┐
               ▼                   ▼                    ▼
-     timeline/ (006, livré)  detections/ (012, codé)   corrélation (prévu)
+     timeline/ (006, livré)  detections/ (012, livré)   corrélation (prévu)
               └───────────────────┼────────────────────┘
                                   ▼
                      reports/ : HTML, SQLite, JSONL (prévu)
@@ -68,7 +68,8 @@ arguments et appelle les packages internes.
 | 005 | Parser EVTX natif (fork interne, ADR-002) + `ingest` | Livré |
 | 006 | `timeline` | Livré |
 | 007–011 | USN, registre, $MFT, Prefetch, importers | Prévu |
-| 012 | `detect` : règles Sigma mono-événement, jeu embarqué | Codé |
+| 012 | `detect` : règles Sigma mono-événement, jeu embarqué | Livré |
+| 013 | Catégories de sources et modificateurs Sigma, garde 4688 | Codé |
 
 ---
 
@@ -120,10 +121,12 @@ internal/
 │   └── files.go              EventFiles : fichiers d'événements des preuves du manifeste (012)
 ├── extsort/               Codé (spec 012, extrait de 006) : tri externe borné, écriture atomique
 ├── timeline/              Livré (spec 006) : filtres, clé canonique ; s'appuie sur extsort
-└── detection/             Codé (spec 012) : règles Sigma, condition, jeu embarqué, détections
+└── detection/             Livré (spec 012), étendu par la 013 (codé) : règles Sigma, catégories, détections
     ├── rule.go, match.go, condition.go   chargement, sélections et modificateurs, condition
-    ├── ruleset.go            jeu embarqué ou --rules, refus, doublons, version du jeu
-    └── rules/*.yml           jeu embarqué (7 règles, Apache-2.0)
+    ├── modifiers.go          windash, base64, base64offset, encodages UTF-16 (013)
+    ├── categories.go, categories.json   table des catégories et de leurs sources, version (013)
+    ├── ruleset.go            jeu embarqué ou --rules, refus, garde, doublons, index, version
+    └── rules/*.yml           jeu embarqué (12 règles, Apache-2.0)
 specs/NNN-*/                  spec, plan, recherche, contrats, tâches de chaque fonctionnalité
 docs/adr/                     décisions d'architecture
 .specify/memory/constitution.md   9 principes non négociables
@@ -149,7 +152,7 @@ Le dossier `spikes/` (code jetable des études) est ignoré par git.
 | `ingest --case [chemins…]` | décode les preuves vers `normalized/` | Livré (005) |
 | `import --case --tool <outil> <chemin>` | lit les sorties d'un outil tiers | Prévu (011) |
 | `timeline --case [--from --to --source]` | chronologie filtrée vers `timeline/timeline.jsonl` | Livré (006) |
-| `detect --case [--rules]` | applique les règles (jeu embarqué par défaut) vers `detections/detections.jsonl` | Codé (012) |
+| `detect --case [--rules]` | applique les règles (jeu embarqué par défaut) vers `detections/detections.jsonl` | Livré (012), catégories (013, codé) |
 | `correlate --case` | reconstitue les chaînes d'attaque | Prévu |
 | `report --case --format html,sqlite,jsonl` | produit les livrables | Prévu |
 | `investigate --case --target` | enchaîne les étapes, sans logique propre ; collecte, ingère, construit la chronologie, détecte, puis s'arrête à `correlate` | Partiel |
@@ -187,7 +190,7 @@ Les commandes non livrées répondent « not implemented yet », avec le code 3.
 - Écrit `timeline/timeline.jsonl` dans l'ordre canonique ; la précédente n'est remplacée qu'une fois
   la nouvelle complète ; l'entrée `case.log` porte les filtres, les compteurs et le SHA-256.
 
-### `detect` (spec 012, codé)
+### `detect` (spec 012, livré ; 013, codé)
 
 - Lit les mêmes fichiers d'événements que `timeline` (tous les événements, sans les filtres de la
   chronologie) et applique le jeu embarqué, ou à la place les règles de `--rules`.
@@ -195,7 +198,9 @@ Les commandes non livrées répondent « not implemented yet », avec le code 3.
   puis `id`, écrit de façon atomique ; une détection est une piste, pas une preuve de compromission.
 - Une règle hors du sous-ensemble Sigma est refusée avec sa raison ; une règle d'un autre produit
   que Windows est écartée et comptée ; l'entrée `case.log` porte l'origine et la version du jeu de
-  règles, les refus, les compteurs et le SHA-256.
+  règles, la version de la table des catégories, les refus, les restrictions de la garde
+  (`rules_restricted`), les compteurs et le SHA-256.
+- Un avertissement par source partielle signale les règles que la garde n'y applique pas (spec 013).
 
 ---
 
@@ -209,7 +214,7 @@ Les commandes non livrées répondent « not implemented yet », avec le code 3.
 ├── parsed/                réservé, non utilisé
 ├── normalized/            événements et anomalies JSONL (005, livré)
 ├── timeline/              timeline.jsonl, chronologie JSONL (006, livré)
-├── detections/            detections.jsonl, détections JSONL (012, codé)
+├── detections/            detections.jsonl, détections JSONL (012, livré)
 ├── reports/               HTML / SQLite / JSONL (prévu)
 └── hashes/manifest.jsonl  empreinte et origine de chaque preuve (ajout seul)
 ```
@@ -334,7 +339,7 @@ manifest.jsonl {file, sha256} ──┴─▶ Source ──▶ Parser.Parse(ctx,
            └─ invalide ─▶ Anomaly{kind: invalid}  (jamais ignoré en silence)
 
 normalized/*.jsonl ─▶ ReadEvents ─▶ filtre ─▶ tri externe ─▶ timeline/timeline.jsonl (006)
-normalized/*.jsonl ─▶ ReadEvents ─▶ règles du canal (012) ─▶ Detection{events: [uid]} ─▶ tri externe
+normalized/*.jsonl ─▶ ReadEvents ─▶ règles (canal, EventID) ─▶ Detection{events: [uid]} ─▶ tri externe
                                                          ─▶ detections/detections.jsonl
 ```
 
@@ -411,31 +416,46 @@ timeline/timeline.jsonl.partial ─▶ SHA-256 au fil de l'écriture ─▶ reno
 
 ---
 
-## 10. Détection (spec 012, codé)
+## 10. Détection (spec 012, livrée ; spec 013, codée)
 
 ```text
 jeu embarqué (rules/*.yml) ou --rules (fichier, ou .yml/.yaml d'un dossier, hors fichiers cachés)
         │  parseRule : produit windows sinon écartée ; champs, niveau, statut, confiance ;
-        │  service → canal ; sélections et modificateurs ; condition (64 niveaux au plus)
+        │  service → canal, ou catégorie → sources (categories.json) ; sélections et
+        │  modificateurs ; condition (64 niveaux au plus) ; garde des sources partielles
         ▼  refus motivés · doublons d'id parmi les règles appliquées → échec · version du jeu
-index par canal ─▶ normalized/<preuve>.jsonl ─▶ événements EVTX évalués par les règles de leur canal
+index canal → EventID → (règle, source) ─▶ normalized/<preuve>.jsonl ─▶ événements EVTX évalués
+        │  par les entrées de leur (canal, EventID), puis par les règles de service de leur canal
         ▼
 Detection (spec 003) ─▶ tri externe (timestamp, id) ─▶ detections/detections.jsonl
 ```
 
 - **Sous-ensemble Sigma** : sélections (table = ET, liste de tables = OU), valeurs multiples,
   jokers `*` et `?`, `contains`, `startswith`, `endswith`, `all`, `re` et `re|i`, `null` ;
-  condition `and`, `or`, `not`, parenthèses, `1 of`, `all of`, `them`. Agrégations, `timeframe`,
-  mots-clés et sources par catégorie sont refusés (relèvent de `correlate` ou d'une évolution).
+  `windash`, `cased`, `base64`, `base64offset`, `wide`/`utf16le`, `utf16be`, `cidr`, `exists`,
+  `fieldref` (013) ; condition `and`, `or`, `not`, parenthèses, `1 of`, `all of`, `them`.
+  Agrégations, `timeframe` et mots-clés sont refusés (relèvent de `correlate`).
+- **Catégories (013)** : table embarquée `categories.json`, versionnée par empreinte
+  (`categories_version`) : 16 catégories, 17 sources (Sysmon 1 à 22, PowerShell 4103 et 4104,
+  Security 4688). Une source est un canal, des EventID, au besoin une contrainte `EventType`
+  (opérations de registre Sysmon 12) et un renommage de champs.
+- **Garde 4688 (013)** : Security 4688 est une source partielle de `process_creation` (`Image` ←
+  `NewProcessName`, `ParentImage` ← `ParentProcessName`, `CommandLine`, plus les champs communs) ;
+  une règle qui cite un autre champ, y compris par `fieldref`, n'y est pas évaluée et la
+  restriction est consignée ; une règle sans source restante est refusée. Sysmon et 4688 décrivant
+  le même lancement donnent deux détections ; leur rapprochement relève de `correlate` (DF-36).
 - **Champs** : `EventID`, `Channel`, `Provider_Name`, `Computer`, puis les données de l'événement
   conservées par `ingest` (`metadata`) ; jamais un message rendu.
 - **Versions** : `rule_version` = empreinte du fichier de la règle (fins de ligne ramenées à LF) ;
   version du jeu = empreinte des couples (id, version) triés, dans `case.log`.
 - **Confiance** : déclarée par la règle, sinon 0,8 / 0,6 / 0,4 selon `stable` / `test` /
   `experimental` ; `mitre` = première technique ATT&CK des étiquettes (identifiant seul).
-- **Jeu embarqué** (7 règles) : effacement des journaux Security et System, stratégie d'audit,
+- **Jeu embarqué** (12 règles) : effacement des journaux Security et System, stratégie d'audit,
   création de compte, ajout à un groupe privilégié (par SID), installation de service, tâche
-  planifiée ; chacune a un cas positif et un cas négatif testés.
+  planifiée ; PowerShell encodé, suppression des clichés par vssadmin, téléchargement par certutil
+  (`process_creation`), clé Run (`registry_set`), script PowerShell qui télécharge et exécute
+  (`ps_script`) ; chacune a un cas positif et un cas négatif testés, Sysmon et 4688 pour
+  `process_creation`.
 
 ---
 
@@ -469,5 +489,17 @@ Detection (spec 003) ─▶ tri externe (timestamp, id) ─▶ detections/detect
   planifiée.
 - **Titres et tactiques ATT&CK** : seul l'identifiant de technique est conservé ; un référentiel
   embarqué (titres, tactiques, version d'ATT&CK) est prévu avec `report` ou `correlate`.
-- **Sources Sigma par catégorie** (`process_creation`…) et champs pivots dans les règles : non
-  pris en charge ; une grande partie du corpus SigmaHQ est refusée avec la raison.
+- **Catégories Sigma rares et sources hors Sysmon** (spec 013) : `ps_classic_*`, `file_delete`,
+  `create_stream_hash`, pare-feu Windows 5156 pour `network_connection`, `ProcessId` hexadécimal
+  de 4688 : non pris en charge. Mesure SC-002 du 2026-11-27 sur SigmaHQ (commit 876eb7b,
+  `rules/windows`, hors du dépôt) : 2 047 règles des catégories couvertes sur 2 047 chargées ; sur
+  tout le dossier, 2 304 règles appliquées et 123 refusées (74 services inconnus, 45 catégories
+  hors table, 3 recherches par mots-clés, 1 sans source). La garde retire Security 4688 de 720
+  des 1 193 règles `process_creation`, surtout pour `OriginalFileName` (588), `Description`,
+  `ParentCommandLine`, `Product` et `Hashes`.
+- **Champs pivots dans les règles** : non pris en charge.
+- **Coût par règle sur un même EventID** (spec 013) : l'index par canal et EventID écarte les
+  règles qui ne visent pas l'événement, mais un événement est évalué par toutes celles de son
+  EventID (environ 57 ns par règle sur des motifs littéraux). 2 000 règles concentrées sur
+  Sysmon 1, 4688 et Sysmon 13 font passer 10 millions d'événements de 2 à 7 min 41 s ; un
+  préfiltre multi-motifs sur les littéraux des règles réduirait ce coût.

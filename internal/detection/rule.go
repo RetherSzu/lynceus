@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"io"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -29,9 +30,12 @@ type Rule struct {
 	MITRE      string
 	Channel    string
 	cond       node
+	sources    []*Source       // sources d'une règle de catégorie, dans l'ordre de la table
+	restricted []Restriction   // sources partielles écartées par la garde
+	fields     map[string]bool // champs cités par les sélections (garde, research R3)
 }
 
-func (r *Rule) match(ev *normalizer.Event) bool { return r.cond.eval(ev) }
+func (r *Rule) match(ev *normalizer.Event, src *Source) bool { return r.cond.eval(ev, src) }
 
 // services associe un service Sigma à son canal EVTX (data-model.md).
 var services = map[string]string{
@@ -117,15 +121,32 @@ func parseRule(name string, data []byte) (r *Rule, skipped bool, err error) {
 		}
 		r.Confidence = f
 	}
-	if get(logsource, "category") != nil {
-		return nil, false, refusal("logsource category is not supported")
+	// Ordre des contrôles de logsource : data-model.md (spec 013).
+	service, category := scalar(get(logsource, "service")), scalar(get(logsource, "category"))
+	if service == "" && category == "" {
+		return nil, false, refusal("missing logsource.service or logsource.category")
 	}
-	service := scalar(get(logsource, "service"))
-	if service == "" {
-		return nil, false, refusal("missing logsource.service")
+	var srcs []*Source
+	if category != "" {
+		if srcs = categories[strings.ToLower(category)]; srcs == nil {
+			return nil, false, refusef("unknown logsource category: %s", category)
+		}
 	}
-	if r.Channel = services[strings.ToLower(service)]; r.Channel == "" {
-		return nil, false, refusef("unknown logsource service: %s", service)
+	if service != "" {
+		if r.Channel = services[strings.ToLower(service)]; r.Channel == "" {
+			return nil, false, refusef("unknown logsource service: %s", service)
+		}
+	}
+	if category != "" {
+		for _, s := range srcs {
+			if service == "" || strings.EqualFold(s.Channel, r.Channel) {
+				r.sources = append(r.sources, s)
+			}
+		}
+		if r.sources == nil {
+			return nil, false, refusal("logsource category and service do not match")
+		}
+		r.Channel = ""
 	}
 
 	det := get(top, "detection")
@@ -143,6 +164,7 @@ func parseRule(name string, data []byte) (r *Rule, skipped bool, err error) {
 		return nil, false, refusal("invalid condition: must be a single expression")
 	}
 	sels := map[string]selection{}
+	r.fields = map[string]bool{}
 	for i := 0; i+1 < len(det.Content); i += 2 {
 		k := det.Content[i].Value
 		if k == "condition" {
@@ -153,8 +175,12 @@ func parseRule(name string, data []byte) (r *Rule, skipped bool, err error) {
 			return nil, false, err
 		}
 		sels[k] = s
+		s.addFields(r.fields)
 	}
 	if r.cond, err = parseCondition(cond.Value, sels); err != nil {
+		return nil, false, err
+	}
+	if err := r.guard(); err != nil {
 		return nil, false, err
 	}
 
@@ -169,6 +195,41 @@ func parseRule(name string, data []byte) (r *Rule, skipped bool, err error) {
 	sum := sha256.Sum256(bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n")))
 	r.Version = hex.EncodeToString(sum[:8])
 	return r, false, nil
+}
+
+// guard retire d'une règle de catégorie les sources partielles qui ne
+// fournissent pas un champ cité (research R3) ; aucune source restante → refus.
+func (r *Rule) guard() error {
+	if r.sources == nil {
+		return nil
+	}
+	var kept []*Source
+	all := map[string]bool{}
+	for _, s := range r.sources {
+		var missing []string
+		for f := range r.fields {
+			if s.Fields != nil && !s.Fields[f] && !commonFields[f] {
+				missing = append(missing, f)
+				all[f] = true
+			}
+		}
+		if missing == nil {
+			kept = append(kept, s)
+			continue
+		}
+		sort.Strings(missing)
+		r.restricted = append(r.restricted, Restriction{File: r.File, Source: s.Name, Missing: missing, Label: s.Label})
+	}
+	if kept == nil {
+		var fs []string
+		for f := range all {
+			fs = append(fs, f)
+		}
+		sort.Strings(fs)
+		return refusef("fields not available in any source: %s", strings.Join(fs, ","))
+	}
+	r.sources = kept
+	return nil
 }
 
 // get renvoie la valeur de la clé k d'une table YAML, ou nil.

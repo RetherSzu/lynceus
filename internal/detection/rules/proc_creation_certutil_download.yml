@@ -1,0 +1,23 @@
+title: File download with certutil
+id: fd6c81ea-7967-4928-8a61-fcd5af347728
+status: test
+description: certutil was used with options that download a file from a remote location.
+author: DFIRFlow
+license: Apache-2.0
+tags:
+    - attack.command-and-control
+    - attack.t1105
+logsource:
+    product: windows
+    category: process_creation
+detection:
+    selection_image:
+        Image|endswith: '\certutil.exe'
+    selection_cli:
+        CommandLine|windash|contains:
+            - ' -urlcache'
+            - ' -verifyctl'
+    condition: all of selection_*
+falsepositives:
+    - Administrators retrieving certificate revocation lists
+level: medium

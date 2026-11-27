@@ -7,6 +7,7 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -534,6 +535,10 @@ func detectCmd(ctx context.Context, o *opts) (err error) {
 			if len(rs.Refused) > 0 {
 				summary["rules_refused"] = rs.Refused
 			}
+			if len(rs.Restricted) > 0 {
+				summary["rules_restricted"] = rs.Restricted
+			}
+			summary["categories_version"] = detection.CategoriesVersion
 		}
 		if sum.Files > 0 || sum.EventsRead > 0 {
 			summary["files"], summary["events_read"], summary["detections"] = sum.Files, sum.EventsRead, sum.Detections
@@ -553,6 +558,23 @@ func detectCmd(ctx context.Context, o *opts) (err error) {
 	if rs != nil {
 		for _, r := range rs.Refused {
 			fmt.Fprintf(o.stderr, "dfirflow: detect: warning: rule refused: %s: %s\n", r.File, r.Reason)
+		}
+		// Un avertissement récapitulatif par source partielle (FR-015a).
+		var labels []string
+		count := map[string]int{}
+		for _, r := range rs.Restricted {
+			if count[r.Label] == 0 {
+				labels = append(labels, r.Label)
+			}
+			count[r.Label]++
+		}
+		sort.Strings(labels)
+		for _, l := range labels {
+			noun := "rules"
+			if count[l] == 1 {
+				noun = "rule"
+			}
+			fmt.Fprintf(o.stderr, "dfirflow: detect: warning: %d %s not applied to %s (missing fields), see case.log\n", count[l], noun, l)
 		}
 	}
 	if err != nil {

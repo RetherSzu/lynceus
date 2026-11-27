@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"DFIRFlow/internal/normalizer"
 )
 
 //go:embed rules/*.yml
@@ -25,6 +27,14 @@ type Refusal struct {
 	Reason string `json:"reason"`
 }
 
+// Restriction est une source partielle retirée d'une règle par la garde.
+type Restriction struct {
+	File    string   `json:"file"`
+	Source  string   `json:"source"`
+	Missing []string `json:"missing"`
+	Label   string   `json:"-"` // libellé de la source, pour l'avertissement
+}
+
 // Ruleset est le jeu de règles d'une exécution.
 type Ruleset struct {
 	Source  string // Embedded ou chemin donné à --rules
@@ -32,8 +42,55 @@ type Ruleset struct {
 	Applied []*Rule
 	Skipped int
 	Refused []Refusal
+	// Restricted liste les couples (règle, source partielle) écartés par la
+	// garde, triés par fichier puis source ; ce ne sont pas des refus (FR-015a).
+	Restricted []Restriction
 
-	byChannel map[string][]*Rule // canal en minuscules
+	byChannel map[string]*channelIndex // canal en minuscules
+}
+
+// entry est une règle évaluée sur une source ; src nil pour une règle de service.
+type entry struct {
+	rule *Rule
+	src  *Source
+}
+
+// channelIndex range les entrées d'un canal par EventID ; any reçoit celles
+// qui ne contraignent pas l'EventID (research R4).
+type channelIndex struct {
+	any  []entry
+	byID map[uint32][]entry
+}
+
+func (rs *Ruleset) index(channel string) *channelIndex {
+	ch := strings.ToLower(channel)
+	ci := rs.byChannel[ch]
+	if ci == nil {
+		ci = &channelIndex{byID: map[uint32][]entry{}}
+		rs.byChannel[ch] = ci
+	}
+	return ci
+}
+
+// candidates renvoie les entrées qui peuvent concerner ev.
+func (rs *Ruleset) candidates(ev *normalizer.Event) [2][]entry {
+	ci := rs.byChannel[strings.ToLower(ev.Channel)]
+	if ci == nil {
+		return [2][]entry{}
+	}
+	var byID []entry
+	if ev.EventID != nil {
+		byID = ci.byID[*ev.EventID]
+	}
+	return [2][]entry{byID, ci.any}
+}
+
+// accepts vérifie la contrainte EventType de la source (data-model.md).
+func (s *Source) accepts(ev *normalizer.Event) bool {
+	if s == nil || s.EventType == nil {
+		return true
+	}
+	return s.EventType[strings.ToLower(ev.Metadata["EventType"])]
 }
 
 // Load charge le jeu embarqué (path vide) ou les règles de path. En cas
@@ -121,26 +178,40 @@ func (rs *Ruleset) add(name string, data []byte) {
 		rs.Skipped++
 	default:
 		rs.Applied = append(rs.Applied, r)
+		rs.Restricted = append(rs.Restricted, r.restricted...)
 	}
 }
 
 // finish contrôle les doublons, calcule la version du jeu et indexe par canal.
 func (rs *Ruleset) finish() error {
 	sort.Slice(rs.Refused, func(i, j int) bool { return rs.Refused[i].File < rs.Refused[j].File })
+	sort.Slice(rs.Restricted, func(i, j int) bool {
+		a, b := rs.Restricted[i], rs.Restricted[j]
+		return a.File < b.File || a.File == b.File && a.Source < b.Source
+	})
 	if len(rs.Applied) == 0 {
 		return fmt.Errorf("no applicable rule in %s", rs.Source)
 	}
 	seen := map[string]string{}
 	var lines []string
-	rs.byChannel = map[string][]*Rule{}
+	rs.byChannel = map[string]*channelIndex{}
 	for _, r := range rs.Applied {
 		if f, ok := seen[r.ID]; ok {
 			return fmt.Errorf("duplicate rule id %s: %s, %s", r.ID, f, r.File)
 		}
 		seen[r.ID] = r.File
 		lines = append(lines, r.ID+"\x00"+r.Version+"\n")
-		ch := strings.ToLower(r.Channel)
-		rs.byChannel[ch] = append(rs.byChannel[ch], r)
+		if r.sources == nil {
+			ci := rs.index(r.Channel)
+			ci.any = append(ci.any, entry{rule: r})
+			continue
+		}
+		for _, s := range r.sources {
+			ci := rs.index(s.Channel)
+			for id := range s.EventIDs {
+				ci.byID[id] = append(ci.byID[id], entry{rule: r, src: s})
+			}
+		}
 	}
 	sort.Strings(lines)
 	sum := sha256.Sum256([]byte(strings.Join(lines, "")))

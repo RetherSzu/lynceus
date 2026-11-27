@@ -1,0 +1,21 @@
+title: Autorun registry value set
+id: 33591d7c-fcc9-4365-83e7-4bd5e79976fc
+status: test
+description: A value was written under a Run or RunOnce key, so that a program starts at each logon.
+author: DFIRFlow
+license: Apache-2.0
+tags:
+    - attack.persistence
+    - attack.t1547.001
+logsource:
+    product: windows
+    category: registry_set
+detection:
+    selection:
+        TargetObject|contains:
+            - '\Software\Microsoft\Windows\CurrentVersion\Run\'
+            - '\Software\Microsoft\Windows\CurrentVersion\RunOnce\'
+    condition: selection
+falsepositives:
+    - Software installers that register a program to start at logon
+level: medium

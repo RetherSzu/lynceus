@@ -63,6 +63,9 @@ func TestSkippedRule(t *testing.T) {
 			t.Errorf("want skipped, got skipped=%v err=%v:\n%s", skipped, err, src)
 		}
 	}
+	if _, skipped, err := parseRule("r.yml", []byte(strings.Replace(catRule("  category: webserver\n", sel), "product: windows", "product: linux", 1))); !skipped || err != nil {
+		t.Errorf("linux with unknown category: skipped=%v err=%v", skipped, err)
+	}
 	if _, skipped, err := parseRule("r.yml", []byte(strings.Replace(rule("", sel), "product: windows", "product: Windows", 1))); skipped || err != nil {
 		t.Errorf("product case: skipped=%v err=%v", skipped, err)
 	}
@@ -81,19 +84,41 @@ func TestRefusedRule(t *testing.T) {
 		{strings.Replace(rule("", sel), "    EventID: 4624\n  condition: sel\n", "    EventID: 4624\n", 1), "missing condition"},
 		{"title: T\nid: r1\nlevel: high\nlogsource:\n  product: windows\n  service: security\n", "missing detection"},
 		{"title: T\nid: r1\nlevel: high\ndetection:\n" + sel, "missing logsource.product"},
-		{strings.Replace(rule("", sel), "  service: security\n", "", 1), "missing logsource.service"},
+		{strings.Replace(rule("", sel), "  service: security\n", "", 1), "missing logsource.service or logsource.category"},
+		{catRule("  category: webserver\n", sel), "unknown logsource category: webserver"},
+		{catRule("  category: process_creation\n  service: system\n", sel), "logsource category and service do not match"},
 		{strings.Replace(rule("", sel), "level: high", "level: urgent", 1), "invalid level: urgent"},
 		{rule("status: beta\n", sel), "invalid status: beta"},
 		{rule("confidence: 1.5\n", sel), "invalid confidence: 1.5"},
 		{rule("confidence: high\n", sel), "invalid confidence: high"},
-		{strings.Replace(rule("", sel), "  service: security\n", "  category: process_creation\n", 1), "logsource category is not supported"},
 		{strings.Replace(rule("", sel), "service: security", "service: nginx", 1), "unknown logsource service: nginx"},
 		{rule("", "  sel:\n    EventID: 4625\n  condition: sel | count() > 5\n"), "aggregation is not supported"},
 		{rule("", sel+"  timeframe: 5m\n"), "timeframe is not supported"},
 		{rule("", "  kw:\n    - mimikatz\n  condition: kw\n"), "keyword search is not supported"},
 		{rule("", "  sel:\n    '|contains': mimikatz\n  condition: sel\n"), "keyword search is not supported"},
-		{rule("", "  sel:\n    CommandLine|base64offset: x\n  condition: sel\n"), "unsupported modifier: base64offset"},
 		{rule("", "  sel:\n    CommandLine|re|m: x\n  condition: sel\n"), "unsupported modifier: m"},
+		{rule("", "  sel:\n    CommandLine|re|windash: x\n  condition: sel\n"), "unsupported modifier: windash"},
+		{rule("", "  sel:\n    CommandLine|re|base64: x\n  condition: sel\n"), "unsupported modifier: base64"},
+		{rule("", "  sel:\n    CommandLine|re|cased: x\n  condition: sel\n"), "unsupported modifier: cased"},
+		{rule("", "  sel:\n    CommandLine|base64|base64offset: x\n  condition: sel\n"), "unsupported modifier: base64offset"},
+		{rule("", "  sel:\n    CommandLine|wide|utf16be|base64: x\n  condition: sel\n"), "unsupported modifier: utf16be"},
+		{rule("", "  sel:\n    CommandLine|wide: x\n  condition: sel\n"), "unsupported modifier: wide"},
+		{rule("", "  sel:\n    CommandLine|base64|wide: x\n  condition: sel\n"), "unsupported modifier: wide"},
+		{rule("", "  sel:\n    CommandLine|base64|windash: x\n  condition: sel\n"), "unsupported modifier: windash"},
+		{rule("", "  sel:\n    CommandLine|base64|cased: x\n  condition: sel\n"), "unsupported modifier: cased"},
+		{rule("", "  sel:\n    CommandLine|contains|base64: x\n  condition: sel\n"), "unsupported modifier: base64"},
+		{rule("", "  sel:\n    Ip|cidr|contains: x\n  condition: sel\n"), "unsupported modifier: contains"},
+		{rule("", "  sel:\n    Ip|exists|contains: x\n  condition: sel\n"), "unsupported modifier: contains"},
+		{rule("", "  sel:\n    Ip|fieldref|startswith: x\n  condition: sel\n"), "unsupported modifier: startswith"},
+		{rule("", "  sel:\n    Ip|windash|fieldref: x\n  condition: sel\n"), "unsupported modifier: fieldref"},
+		{rule("", "  sel:\n    CommandLine|contains|contains: x\n  condition: sel\n"), "unsupported modifier: contains"},
+		{rule("", "  sel:\n    CommandLine|utf16|base64: x\n  condition: sel\n"), "unsupported modifier: utf16"},
+		{rule("", "  sel:\n    CommandLine|expand: x\n  condition: sel\n"), "unsupported modifier: expand"},
+		{rule("", "  sel:\n    Count|gt: 5\n  condition: sel\n"), "unsupported modifier: gt"},
+		{rule("", "  sel:\n    Ip|cidr: 300.0.0.0/8\n  condition: sel\n"), "invalid selection sel: field Ip: "},
+		{rule("", "  sel:\n    Ip|exists: maybe\n  condition: sel\n"), "invalid selection sel: field Ip: "},
+		{rule("", "  sel:\n    Ip|exists: [true, false]\n  condition: sel\n"), "invalid selection sel: field Ip: "},
+		{rule("", "  sel:\n    Ip|fieldref: ''\n  condition: sel\n"), "invalid selection sel: field Ip: "},
 		{rule("", "  sel:\n    CommandLine|i: x\n  condition: sel\n"), "unsupported modifier: i"},
 		{rule("", "  sel:\n    CommandLine|contains|re: x\n  condition: sel\n"), "unsupported modifier: re"},
 		{rule("", "  sel:\n    CommandLine|re|contains: x\n  condition: sel\n"), "unsupported modifier: contains"},

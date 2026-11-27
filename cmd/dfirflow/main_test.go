@@ -686,10 +686,14 @@ func TestDetectCommand(t *testing.T) {
 
 	c = newDetectCase(t)
 	code, out, errOut := invoke(ctx, "detect", "--case", c)
-	if want := "detect: 7 rules applied, 0 skipped, 0 refused, 739 events read, 15 detections: detections/detections.jsonl\n"; code != 0 || out != want || errOut != "" {
+	if want := "detect: 12 rules applied, 0 skipped, 0 refused, 739 events read, 15 detections: detections/detections.jsonl\n"; code != 0 || out != want || errOut != "" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	first, _ := os.ReadFile(filepath.Join(c, "detections", "detections.jsonl"))
+	// Spec 013, SC-006 : détections de la spec 012 inchangées octet par octet.
+	if ref, err := os.ReadFile("../../internal/detection/testdata/security_012.jsonl"); err != nil || !bytes.Equal(first, ref) {
+		t.Errorf("detections differ from the 012 reference (%v)", err)
+	}
 	// SC-001 : 1 effacement du journal (1102), 14 modifications de la stratégie d'audit (4719).
 	count := map[string]int{}
 	for _, l := range strings.Split(strings.TrimSpace(string(first)), "\n") {
@@ -720,7 +724,7 @@ func TestDetectLog(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(c, "detections", "detections.jsonl"))
 	entry, sum := lastSummary(t, c)
 	if v, _ := sum["ruleset_version"].(string); entry["command"] != "detect" || entry["exit_code"] != 0.0 || sum["rules"] != "embedded" ||
-		len(v) != 16 || sum["rules_applied"] != 7.0 || sum["rules_skipped"] != 0.0 || sum["files"] != 1.0 ||
+		len(v) != 16 || len(sum["categories_version"].(string)) != 16 || sum["rules_applied"] != 12.0 || sum["rules_skipped"] != 0.0 || sum["files"] != 1.0 ||
 		sum["events_read"] != 739.0 || sum["detections"] != 15.0 || sum["sha256"] != sha(string(data)) ||
 		sum["rules_refused"] != nil || sum["unknown_files"] != nil || sum["error"] != nil {
 		t.Fatalf("journal = %v", entry)
@@ -789,5 +793,41 @@ func TestDetectRulesCommand(t *testing.T) {
 	}
 	if after, _ := os.ReadFile(filepath.Join(c, "detections", "detections.jsonl")); !bytes.Equal(after, prev) {
 		t.Error("previous detections changed")
+	}
+}
+
+// TestDetectCategories : process_creation sur les 4688 de la référence,
+// avertissement de garde et case.log (spec 013, FR-015, FR-015a).
+func TestDetectCategories(t *testing.T) {
+	ctx := context.Background()
+	c := newDetectCase(t)
+	r := t.TempDir()
+	rule := func(id, det string) string {
+		return "title: T\nid: " + id + "\nlevel: high\nlogsource:\n  product: windows\n  category: process_creation\ndetection:\n" + det
+	}
+	os.WriteFile(filepath.Join(r, "parent.yml"), []byte(rule("parent", "  sel:\n    ParentImage|endswith: '\\smss.exe'\n  condition: sel\n")), 0o644)
+	code, out, errOut := invoke(ctx, "detect", "--case", c, "--rules", r)
+	if code != 0 || errOut != "" || !strings.Contains(out, ", 7 detections:") {
+		t.Fatalf("parent: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+
+	hash := "  sel:\n    Image|endswith: '\\smss.exe'\n  filter:\n    Hashes|contains: 'SHA256='\n  condition: sel and not filter\n"
+	hp := filepath.Join(r, "hash.yml")
+	os.WriteFile(hp, []byte(rule("hash", hash)), 0o644)
+	code, out, errOut = invoke(ctx, "detect", "--case", c, "--rules", r)
+	if want := "dfirflow: detect: warning: 1 rule not applied to Security 4688 (missing fields), see case.log\n"; code != 0 || errOut != want || !strings.Contains(out, ", 7 detections:") {
+		t.Fatalf("hash: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	_, sum := lastSummary(t, c)
+	v, _ := sum["categories_version"].(string)
+	restricted, _ := json.Marshal(sum["rules_restricted"])
+	wantR, _ := json.Marshal([]map[string]interface{}{{"file": hp, "source": "security-4688", "missing": []string{"Hashes"}}})
+	if len(v) != 16 || string(restricted) != string(wantR) || sum["rules_refused"] != nil {
+		t.Fatalf("journal = %v", sum)
+	}
+
+	os.WriteFile(filepath.Join(r, "hash2.yml"), []byte(rule("hash2", hash)), 0o644)
+	if _, _, errOut = invoke(ctx, "detect", "--case", c, "--rules", r); !strings.Contains(errOut, "warning: 2 rules not applied to Security 4688") {
+		t.Fatalf("two: stderr=%q", errOut)
 	}
 }

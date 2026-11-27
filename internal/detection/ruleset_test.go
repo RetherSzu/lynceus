@@ -3,11 +3,13 @@ package detection
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
 
-func writeRules(t *testing.T, files map[string]string) string {
+func writeRules(t testing.TB, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for name, src := range files {
@@ -101,11 +103,95 @@ func TestLoadPath(t *testing.T) {
 	}
 }
 
-func mustLoad(t *testing.T, p string) *Ruleset {
+func mustLoad(t testing.TB, p string) *Ruleset {
 	t.Helper()
 	rs, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return rs
+}
+
+func TestCategoryAndService(t *testing.T) {
+	det := "  sel:\n    Image: x\n  condition: sel\n"
+	for _, c := range []struct {
+		logsource, channel string
+		id                 uint32
+		src                string
+	}{
+		{"  category: process_creation\n  service: sysmon\n", sysmonCh, 1, "sysmon-1"},
+		{"  category: ps_script\n  service: powershell\n", psCh, 4104, "powershell-4104"},
+	} {
+		rs := mustLoad(t, writeRules(t, map[string]string{"r.yml": catRule(c.logsource, det)}))
+		n := 0
+		for ch, ci := range rs.byChannel {
+			for id, es := range ci.byID {
+				for _, e := range es {
+					n++
+					if ch != strings.ToLower(c.channel) || id != c.id || e.src.Name != c.src {
+						t.Errorf("%q: entry %s/%d/%s", c.logsource, ch, id, e.src.Name)
+					}
+				}
+			}
+			if len(ci.any) != 0 {
+				t.Errorf("%q: entries without event id", c.logsource)
+			}
+		}
+		if n != 1 {
+			t.Errorf("%q: %d entries, want 1", c.logsource, n)
+		}
+	}
+}
+
+// TestGuard4688 : la garde retire Security 4688 des règles qui citent un champ
+// qu'elle ne fournit pas (FR-006, FR-008, research R3, R7).
+func TestGuard4688(t *testing.T) {
+	pc := "  category: process_creation\n"
+	sources := func(rs *Ruleset) []string {
+		set := map[string]bool{}
+		for _, ci := range rs.byChannel {
+			for _, es := range ci.byID {
+				for _, e := range es {
+					set[e.src.Name] = true
+				}
+			}
+		}
+		var out []string
+		for s := range set {
+			out = append(out, s)
+		}
+		sort.Strings(out)
+		return out
+	}
+	full := "  sel:\n    Image|endswith: '\\x.exe'\n    CommandLine|contains: y\n    EventID: 1\n    Channel: c\n    Provider_Name: p\n    Computer: h\n  condition: sel\n"
+	rs := mustLoad(t, writeRules(t, map[string]string{"a.yml": catRule(pc, full)}))
+	if got := sources(rs); strings.Join(got, ",") != "security-4688,sysmon-1" || rs.Restricted != nil {
+		t.Errorf("full rule: sources %v, restricted %v", got, rs.Restricted)
+	}
+
+	hashes := "  sel:\n    Image|endswith: '\\x.exe'\n  filter:\n    Hashes|contains: 'SHA256='\n    User: u\n  condition: sel and not filter\n"
+	dir := writeRules(t, map[string]string{
+		"b.yml": withID("b", catRule(pc, hashes)),
+		"a.yml": withID("a", catRule(pc, hashes)),
+	})
+	rs = mustLoad(t, dir)
+	if got := sources(rs); strings.Join(got, ",") != "sysmon-1" {
+		t.Errorf("hashes rule: sources %v", got)
+	}
+	want := []Restriction{
+		{filepath.Join(dir, "a.yml"), "security-4688", []string{"Hashes", "User"}, "Security 4688"},
+		{filepath.Join(dir, "b.yml"), "security-4688", []string{"Hashes", "User"}, "Security 4688"},
+	}
+	if !reflect.DeepEqual(rs.Restricted, want) || len(rs.Refused) != 0 {
+		t.Errorf("restricted %v, refused %v", rs.Restricted, rs.Refused)
+	}
+
+	r := mustRule(t, catRule(pc, "  sel:\n    Image|fieldref: OriginalFileName\n  condition: sel\n"))
+	if len(r.restricted) != 1 || strings.Join(r.restricted[0].Missing, ",") != "OriginalFileName" {
+		t.Errorf("fieldref target: %v", r.restricted)
+	}
+	_, _, err := parseRule("r.yml", []byte(catRule(pc+"  service: security\n", hashes)))
+	if err == nil || err.Error() != "fields not available in any source: Hashes,User" {
+		t.Errorf("security only: %v", err)
+	}
 }

@@ -32,13 +32,13 @@ func TestCondition(t *testing.T) {
 		"a and not (d or not b)": true,
 	} {
 		r := mustRule(t, rule("", det+cond+"\n"))
-		if got := r.match(&ev); got != want {
+		if got := r.match(&ev, nil); got != want {
 			t.Errorf("%q: %v, want %v", cond, got, want)
 		}
 	}
 	// them exclut _c, faux ici : all of them ne dépend que de a.
 	r := mustRule(t, rule("", "  a:\n    A: 1\n  _c:\n    C: 9\n  condition: all of them\n"))
-	if !r.match(&ev) {
+	if !r.match(&ev, nil) {
 		t.Error("them must skip _c")
 	}
 

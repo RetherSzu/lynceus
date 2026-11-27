@@ -7,10 +7,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -145,7 +150,7 @@ func TestRunEmbedded(t *testing.T) {
 	var want []normalizer.Detection
 	for _, ev := range evs {
 		for _, r := range rs.Applied {
-			if ev.Source == normalizer.SourceEVTX && strings.EqualFold(ev.Channel, r.Channel) && r.match(&ev) {
+			if ev.Source == normalizer.SourceEVTX && strings.EqualFold(ev.Channel, r.Channel) && r.match(&ev, nil) {
 				want = append(want, normalizer.Detection{
 					ID: normalizer.DetectionID(r.ID, r.Version, []string{ev.UID}), Timestamp: ev.Timestamp,
 					RuleID: r.ID, RuleVersion: r.Version, Severity: r.Severity, Confidence: r.Confidence,
@@ -327,13 +332,26 @@ func TestRunLarge(t *testing.T) {
 		enc := normalizer.NewEncoder(w)
 		for i := 0; i < total/nfiles; i++ {
 			n := f*total/nfiles + i
-			ev := evtx("Security", "Microsoft-Windows-Security-Auditing", 4624, map[string]string{"LogonType": "3", "TargetUserName": "user"}, n)
+			var ev normalizer.Event
 			switch {
-			case n%100 == 0: // 1 % satisfait une règle embarquée
-				ev.EventID = ptrU32(4719)
+			case n%200 == 0: // 1 % satisfait une règle embarquée : de service...
+				ev = evtx("Security", "Microsoft-Windows-Security-Auditing", 4719, nil, n)
 				wantDet++
-			case n%2 == 0:
-				ev.Channel, ev.Provider, ev.EventID = "System", "Service Control Manager", ptrU32(7036)
+			case n%200 == 100: // ... ou de catégorie
+				ev = proc(n, `C:\Windows\System32\vssadmin.exe`, "vssadmin delete shadows /all")
+				wantDet++
+			case n%6 == 0:
+				ev = proc(n, `C:\w\a.exe`, "a -x")
+			case n%6 == 1:
+				ev = evtx(sysmonCh, "Microsoft-Windows-Sysmon", 3, map[string]string{"Image": `C:\w\a.exe`, "DestinationIp": "10.0.0.1"}, n)
+			case n%6 == 2:
+				ev = evtx(sysmonCh, "Microsoft-Windows-Sysmon", 13, map[string]string{"EventType": "SetValue", "TargetObject": `HKLM\Software\x`}, n)
+			case n%6 == 3:
+				ev = evtx(psCh, "Microsoft-Windows-PowerShell", 4104, map[string]string{"ScriptBlockText": "Get-Process"}, n)
+			case n%6 == 4:
+				ev = evtx("Security", "Microsoft-Windows-Security-Auditing", 4624, map[string]string{"LogonType": "3", "TargetUserName": "user"}, n)
+			default:
+				ev = proc4688(n, `C:\w\a.exe`, "a -x")
 			}
 			ev.SourceFile = name
 			ev.UID = normalizer.UID(zeroHash, name, ev.RecordLocator)
@@ -346,35 +364,69 @@ func TestRunLarge(t *testing.T) {
 		}
 		fh.Close()
 	}
-	rs, _ := Load("")
-
-	runtime.GC()
-	var peak uint64
-	done := make(chan struct{})
-	go func() {
-		var m runtime.MemStats
-		for {
-			select {
-			case <-done:
-				return
-			case <-time.After(100 * time.Millisecond):
-				runtime.ReadMemStats(&m)
-				if m.HeapInuse > peak {
-					peak = m.HeapInuse
+	measure := func(rs *Ruleset) time.Duration {
+		runtime.GC()
+		var peak uint64
+		done := make(chan struct{})
+		go func() {
+			var m runtime.MemStats
+			for {
+				select {
+				case <-done:
+					return
+				case <-time.After(100 * time.Millisecond):
+					runtime.ReadMemStats(&m)
+					if m.HeapInuse > peak {
+						peak = m.HeapInuse
+					}
 				}
 			}
+		}()
+		start := time.Now()
+		sum, err := Run(context.Background(), c, rs)
+		elapsed := time.Since(start)
+		close(done)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}()
-	start := time.Now()
-	sum, err := Run(context.Background(), c, rs)
-	elapsed := time.Since(start)
-	close(done)
-	if err != nil {
-		t.Fatal(err)
+		t.Logf("%d rules: %d events, %d detections in %v, peak heap %d MiB", len(rs.Applied), sum.EventsRead, sum.Detections, elapsed, peak>>20)
+		if sum.EventsRead != total || sum.Detections != wantDet || peak > 256<<20 || elapsed > 5*time.Minute {
+			t.Fatalf("read=%d detections=%d (want %d) peak=%d MiB elapsed=%v", sum.EventsRead, sum.Detections, wantDet, peak>>20, elapsed)
+		}
+		return elapsed
 	}
-	t.Logf("%d events, %d detections in %v, peak heap %d MiB", sum.EventsRead, sum.Detections, elapsed, peak>>20)
-	if sum.EventsRead != total || sum.Detections != wantDet || peak > 256<<20 || elapsed > 5*time.Minute {
-		t.Fatalf("read=%d detections=%d (want %d) peak=%d MiB elapsed=%v", sum.EventsRead, sum.Detections, wantDet, peak>>20, elapsed)
+	rs, _ := Load("")
+	first := measure(rs)
+
+	// Spec 013, research R4, SC-007 : 2 000 règles de catégorie de plus, toutes
+	// fausses ; 1 800 visent des EventID absents du flux, que l'index n'examine
+	// jamais, 200 des EventID présents (process_creation, registry_set).
+	files := map[string]string{}
+	ruleFiles, _ := fs.Glob(embedded, "rules/*.yml")
+	for _, n := range ruleFiles {
+		b, _ := embedded.ReadFile(n)
+		files[path.Base(n)] = string(b)
+	}
+	cold := []string{"driver_load", "image_load", "create_remote_thread", "process_access", "file_event",
+		"dns_query", "pipe_created", "wmi_event", "registry_add", "registry_delete", "ps_module"}
+	for i := 0; i < 2000; i++ {
+		cat := cold[i%len(cold)]
+		switch {
+		case i < 100:
+			cat = "process_creation"
+		case i < 200:
+			cat = "registry_set"
+		}
+		id := fmt.Sprintf("syn%d", i)
+		files[id+".yml"] = withID(id, catRule("  category: "+cat+"\n",
+			fmt.Sprintf("  sel:\n    Image|endswith: '\\nomatch%d.exe'\n    TargetObject|contains: '\\nomatch%d\\'\n  condition: sel\n", i, i)))
+	}
+	big := mustLoad(t, writeRules(t, files))
+	if len(big.Applied) != 2012 {
+		t.Fatalf("%d rules applied", len(big.Applied))
+	}
+	if second := measure(big); second > 2*first {
+		t.Errorf("2012 rules: %v, more than twice %v", second, first)
 	}
 
 	f, err := os.Open(filepath.Join(c.Dir("detections"), "detections.jsonl"))
@@ -407,3 +459,90 @@ func TestRunLarge(t *testing.T) {
 }
 
 func ptrU32(v uint32) *uint32 { return &v }
+
+// TestRunCategories : règles de catégorie et de service sur un cas mêlant
+// Sysmon, PowerShell et Security (FR-016).
+func TestRunCategories(t *testing.T) {
+	c := newCase(t, secLog)
+	evs := []normalizer.Event{
+		evtx(sysmonCh, "Microsoft-Windows-Sysmon", 1, map[string]string{"Image": `C:\x.exe`}, 1),
+		evtx(sysmonCh, "Microsoft-Windows-Sysmon", 3, map[string]string{"Image": `C:\x.exe`}, 2),
+		evtx(sysmonCh, "Microsoft-Windows-Sysmon", 13, map[string]string{"EventType": "SetValue", "TargetObject": `HKU\Run\a`}, 3),
+		evtx(sysmonCh, "Microsoft-Windows-Sysmon", 12, map[string]string{"EventType": "CreateKey", "TargetObject": `HKU\Run\a`}, 4),
+		evtx(psCh, "Microsoft-Windows-PowerShell", 4104, map[string]string{"ScriptBlockText": "IEX $x"}, 5),
+		evtx("Security", "Microsoft-Windows-Security-Auditing", 4624, nil, 6),
+		evtx("Security", "Microsoft-Windows-Security-Auditing", 4625, nil, 7),
+	}
+	writeEvents(t, c, secLog+".jsonl", evs)
+	dir := writeRules(t, map[string]string{
+		"pc.yml":  withID("pc", catRule("  category: process_creation\n", "  sel:\n    Image|endswith: '\\x.exe'\n  condition: sel\n")),
+		"reg.yml": withID("reg", catRule("  category: registry_set\n", "  sel:\n    TargetObject|contains: '\\Run\\'\n  condition: sel\n")),
+		"ps.yml":  withID("ps", catRule("  category: ps_script\n", "  sel:\n    ScriptBlockText|contains: IEX\n  condition: sel\n")),
+		"svc.yml": withID("svc", rule("", sel4624)),
+	})
+	rs := mustLoad(t, dir)
+	if _, err := Run(context.Background(), c, rs); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	err := normalizer.ReadDetections(bytes.NewReader(readDetections(t, c)), func(d normalizer.Detection) error {
+		got[d.Events[0]] = d.RuleID
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{evs[0].UID: "pc", evs[2].UID: "reg", evs[4].UID: "ps", evs[5].UID: "svc"}
+	if len(got) != len(want) {
+		t.Fatalf("detections %v, want %v", got, want)
+	}
+	for uid, id := range want {
+		if got[uid] != id {
+			t.Errorf("event %s: rule %q, want %q", uid, got[uid], id)
+		}
+	}
+	var lines []string
+	for _, r := range rs.Applied {
+		lines = append(lines, r.ID+"\x00"+r.Version+"\n")
+	}
+	sort.Strings(lines)
+	s := sha256.Sum256([]byte(strings.Join(lines, "")))
+	if rs.Version != hex.EncodeToString(s[:8]) {
+		t.Errorf("ruleset version %s depends on more than the rules", rs.Version)
+	}
+}
+
+const sel4624 = "  sel:\n    EventID: 4624\n  condition: sel\n"
+
+// TestRun4688 : un même lancement vu par Sysmon et par 4688 donne deux
+// détections ; la garde n'en laisse qu'une (FR-005a, SC-003).
+func TestRun4688(t *testing.T) {
+	c := newCase(t, secLog)
+	evs := []normalizer.Event{
+		evtx(sysmonCh, "Microsoft-Windows-Sysmon", 1, map[string]string{"Image": `C:\w\x.exe`, "ParentImage": `C:\w\p.exe`, "CommandLine": "x -y"}, 1),
+		evtx("Security", "Microsoft-Windows-Security-Auditing", 4688, map[string]string{"NewProcessName": `C:\w\x.exe`, "ParentProcessName": `C:\w\p.exe`, "CommandLine": "x -y"}, 2),
+		evtx("Security", "Microsoft-Windows-Security-Auditing", 4688, map[string]string{"NewProcessName": `C:\w\z.exe`}, 3),
+	}
+	writeEvents(t, c, secLog+".jsonl", evs)
+	pc := "  category: process_creation\n"
+	dir := writeRules(t, map[string]string{
+		"both.yml": withID("both", catRule(pc, "  sel:\n    Image|endswith: '\\x.exe'\n    ParentImage|endswith: '\\p.exe'\n    CommandLine|contains: '-y'\n  condition: sel\n")),
+		"hash.yml": withID("hash", catRule(pc, "  sel:\n    Image|endswith: '\\x.exe'\n  filter:\n    Hashes|contains: 'SHA256=AA'\n  condition: sel and not filter\n")),
+		"nocl.yml": withID("nocl", catRule(pc, "  sel:\n    Image|endswith: '\\z.exe'\n  cl:\n    CommandLine|contains: x\n  condition: sel and not cl\n")),
+	})
+	if _, err := Run(context.Background(), c, mustLoad(t, dir)); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	err := normalizer.ReadDetections(bytes.NewReader(readDetections(t, c)), func(d normalizer.Detection) error {
+		got[d.RuleID+" "+d.Events[0]]++
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"both " + evs[0].UID: 1, "both " + evs[1].UID: 1, "hash " + evs[0].UID: 1, "nocl " + evs[2].UID: 1}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("detections %v, want %v", got, want)
+	}
+}

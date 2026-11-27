@@ -13,7 +13,7 @@ const maxDepth = 64
 
 // node est un nœud de l'arbre d'une condition.
 type node interface {
-	eval(ev *normalizer.Event) bool
+	eval(ev *normalizer.Event, src *Source) bool
 }
 
 type (
@@ -23,19 +23,19 @@ type (
 	orNode  []node
 )
 
-func (n selNode) eval(ev *normalizer.Event) bool { return selection(n).match(ev) }
-func (n notNode) eval(ev *normalizer.Event) bool { return !n.n.eval(ev) }
-func (n andNode) eval(ev *normalizer.Event) bool {
+func (n selNode) eval(ev *normalizer.Event, src *Source) bool { return selection(n).match(ev, src) }
+func (n notNode) eval(ev *normalizer.Event, src *Source) bool { return !n.n.eval(ev, src) }
+func (n andNode) eval(ev *normalizer.Event, src *Source) bool {
 	for _, c := range n {
-		if !c.eval(ev) {
+		if !c.eval(ev, src) {
 			return false
 		}
 	}
 	return true
 }
-func (n orNode) eval(ev *normalizer.Event) bool {
+func (n orNode) eval(ev *normalizer.Event, src *Source) bool {
 	for _, c := range n {
-		if c.eval(ev) {
+		if c.eval(ev, src) {
 			return true
 		}
 	}

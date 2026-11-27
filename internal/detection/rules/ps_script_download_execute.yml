@@ -1,0 +1,26 @@
+title: PowerShell script downloads and executes code
+id: 5aa5ae5e-ab5b-4d44-85ad-7fde1a9291b3
+status: test
+description: A PowerShell script block downloads content and evaluates it as code.
+author: DFIRFlow
+license: Apache-2.0
+tags:
+    - attack.execution
+    - attack.t1059.001
+logsource:
+    product: windows
+    category: ps_script
+detection:
+    selection_download:
+        ScriptBlockText|contains:
+            - 'DownloadString('
+            - 'DownloadFile('
+            - 'Invoke-WebRequest'
+    selection_exec:
+        ScriptBlockText|contains:
+            - 'IEX'
+            - 'Invoke-Expression'
+    condition: all of selection_*
+falsepositives:
+    - Installation scripts that download and run a bootstrapper
+level: medium

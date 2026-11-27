@@ -75,7 +75,7 @@ dfirflow detect   --case ./cases/CASE-001
 Exemple de sortie de `detect` :
 
 ```text
-detect: 7 rules applied, 0 skipped, 0 refused, 739 events read, 15 detections: detections/detections.jsonl
+detect: 12 rules applied, 0 skipped, 0 refused, 739 events read, 15 detections: detections/detections.jsonl
 ```
 
 ---
@@ -216,7 +216,7 @@ manifeste.
 
 ### Le jeu embarqué
 
-Sans option, `detect` applique sept règles intégrées au binaire :
+Sans option, `detect` applique douze règles intégrées au binaire :
 
 | Règle | Événement | Sévérité | ATT&CK |
 |---|---|---|---|
@@ -227,9 +227,15 @@ Sans option, `detect` applique sept règles intégrées au binaire :
 | Membre ajouté à un groupe privilégié (identifié par SID) | Security 4728, 4732, 4756 | high | T1098 |
 | Service installé | System 7045 | medium | T1543.003 |
 | Tâche planifiée créée | Security 4698 | medium | T1053.005 |
+| PowerShell lancé avec une commande encodée | `process_creation` | medium | T1059.001 |
+| Clichés instantanés supprimés par vssadmin | `process_creation` | high | T1490 |
+| Téléchargement de fichier par certutil | `process_creation` | medium | T1105 |
+| Valeur de démarrage automatique (Run, RunOnce) écrite | `registry_set` | medium | T1547.001 |
+| Script PowerShell qui télécharge puis exécute du code | `ps_script` | medium | T1059.001 |
 
 Les groupes privilégiés sont reconnus par leur SID et non par leur nom, pour que la règle
-fonctionne quelle que soit la langue du système.
+fonctionne quelle que soit la langue du système. Les règles `process_creation` s'appliquent aux
+journaux Sysmon et, sur une machine sans Sysmon, aux événements Security 4688.
 
 ### Utiliser ses propres règles
 
@@ -252,7 +258,8 @@ Chaque règle est examinée avant usage :
 
 - deux règles appliquées avec le même `id` font échouer la commande.
 
-L'origine du jeu, sa version et la liste des refus sont consignées dans `case.log`.
+L'origine du jeu, sa version, la version de la table des catégories et la liste des refus sont
+consignées dans `case.log`.
 
 ### Écrire et tester une règle
 
@@ -288,18 +295,70 @@ Les champs disponibles sont ceux d'un événement de `normalized/` : `EventID`, 
 `CommandLine`…). La valeur d'un champ est comparée au texte tel qu'il apparaît dans l'événement,
 jamais à un message rendu par Windows.
 
+### Sources : services et catégories
+
+Une règle désigne sa source par un service (`service: security`) ou par une catégorie
+(`category: process_creation`), comme les règles publiques Sigma :
+
+```yaml
+logsource:
+    product: windows
+    category: process_creation
+detection:
+    selection:
+        Image|endswith: '\vssadmin.exe'
+        CommandLine|contains|all:
+            - delete
+            - shadows
+    condition: selection
+```
+
+Services reconnus : `security`, `system`, `application`, `powershell`, `powershell-classic`,
+`sysmon`, `taskscheduler`, `windefend`, `wmi`.
+
+Catégories reconnues, et les événements auxquels elles s'appliquent :
+
+| Catégorie | Événements |
+|---|---|
+| `process_creation` | Sysmon 1 ; Security 4688 (voir plus bas) |
+| `network_connection` | Sysmon 3 |
+| `driver_load`, `image_load` | Sysmon 6, Sysmon 7 |
+| `create_remote_thread`, `process_access` | Sysmon 8, Sysmon 10 |
+| `file_event` | Sysmon 11 |
+| `registry_add`, `registry_delete` | Sysmon 12 (création, suppression) |
+| `registry_set`, `registry_event` | Sysmon 13 ; Sysmon 12, 13 et 14 |
+| `pipe_created`, `wmi_event`, `dns_query` | Sysmon 17-18, Sysmon 19-21, Sysmon 22 |
+| `ps_module`, `ps_script` | PowerShell opérationnel 4103, 4104 |
+
+Une règle qui déclare à la fois une catégorie et un service ne vise que les événements de la
+catégorie présents dans le journal du service.
+
+**Security 4688.** Sur une machine sans Sysmon, une règle `process_creation` s'applique aussi aux
+événements 4688, avec `Image` lu dans `NewProcessName` et `ParentImage` dans `ParentProcessName`.
+4688 ne fournit que `Image`, `ParentImage` et `CommandLine` (plus `EventID`, `Channel`,
+`Provider_Name`, `Computer`) : une règle qui cite un autre champ, par exemple `Hashes` dans un
+filtre, n'y est pas appliquée, sinon le filtre serait toujours faux et la règle produirait des
+faux positifs. Un avertissement le signale, et `case.log` donne le détail par règle :
+
+```text
+dfirflow: detect: warning: 3 rules not applied to Security 4688 (missing fields), see case.log
+```
+
+Quand Sysmon et 4688 enregistrent le même lancement, une règle produit deux détections, une par
+événement.
+
 ### Le sous-ensemble Sigma pris en charge
 
 | Pris en charge | Refusé (raison affichée) |
 |---|---|
 | Sélection en table (ET) ou en liste de tables (OU) | Recherche par mots-clés |
 | Valeurs multiples, jokers `*` et `?`, comparaison insensible à la casse | Agrégations (`\| count() > 5`) et `timeframe` |
-| `contains`, `startswith`, `endswith`, `all`, `re`, `re\|i` | Sources par catégorie (`category: process_creation`…) |
-| `null` (champ absent ou vide) | Modificateurs non listés (`base64`, `cidr`…) |
+| `contains`, `startswith`, `endswith`, `all`, `re`, `re\|i` | Comparaisons numériques (`gt`, `lt`…) et dates |
+| `windash` (`-`, `/` et tirets typographiques), `cased` | `expand`, `utf16`, options `m` et `s` de `re` |
+| `base64`, `base64offset`, précédés au besoin de `wide`, `utf16le`, `utf16be` | Combinaisons incohérentes (`re\|windash`, `base64\|cased`…) |
+| `cidr` (IPv4 et IPv6), `exists`, `fieldref` | Catégories hors du tableau ci-dessus |
+| `null` (champ absent ou vide) | |
 | `and`, `or`, `not`, parenthèses, `1 of`, `all of`, `them` | |
-
-Services reconnus : `security`, `system`, `application`, `powershell`, `powershell-classic`,
-`sysmon`, `taskscheduler`, `windefend`, `wmi`.
 
 Les règles portant sur plusieurs événements (seuils, fenêtres de temps, enchaînements) relèvent
 de la future commande `correlate`.
@@ -410,9 +469,9 @@ Limites connues :
 
 - **Pas de collecte à chaud** : un journal verrouillé par un système en fonctionnement est
   signalé en échec ; travaillez sur un volume monté ou une image.
-- **Sources Sigma par catégorie** (`process_creation`, `network_connection`…) non prises en
-  charge pour l'instant : une grande partie des règles publiques de SigmaHQ est donc refusée,
-  avec la raison.
+- **Catégories Sigma** : seules les catégories du tableau ci-dessus sont reconnues, à partir de
+  Sysmon, de PowerShell et de Security 4688 ; les autres (`ps_classic_start`, pare-feu…) sont
+  refusées avec la raison.
 - **Pas de verrou de cas** : ne lancez pas deux commandes en même temps sur un même cas.
 - **Enregistrements EVTX supprimés** (espace libre des fichiers) : non récupérés.
 

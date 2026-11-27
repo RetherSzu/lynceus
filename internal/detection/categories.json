@@ -1,0 +1,242 @@
+[
+  {
+    "category": "process_creation",
+    "sources": [
+      {
+        "name": "sysmon-1",
+        "label": "Sysmon 1",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          1
+        ]
+      },
+      {
+        "name": "security-4688",
+        "label": "Security 4688",
+        "channel": "Security",
+        "event_ids": [
+          4688
+        ],
+        "rename": {
+          "Image": "NewProcessName",
+          "ParentImage": "ParentProcessName"
+        },
+        "fields": [
+          "CommandLine",
+          "Image",
+          "ParentImage"
+        ]
+      }
+    ]
+  },
+  {
+    "category": "network_connection",
+    "sources": [
+      {
+        "name": "sysmon-3",
+        "label": "Sysmon 3",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          3
+        ]
+      }
+    ]
+  },
+  {
+    "category": "driver_load",
+    "sources": [
+      {
+        "name": "sysmon-6",
+        "label": "Sysmon 6",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          6
+        ]
+      }
+    ]
+  },
+  {
+    "category": "image_load",
+    "sources": [
+      {
+        "name": "sysmon-7",
+        "label": "Sysmon 7",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          7
+        ]
+      }
+    ]
+  },
+  {
+    "category": "create_remote_thread",
+    "sources": [
+      {
+        "name": "sysmon-8",
+        "label": "Sysmon 8",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          8
+        ]
+      }
+    ]
+  },
+  {
+    "category": "process_access",
+    "sources": [
+      {
+        "name": "sysmon-10",
+        "label": "Sysmon 10",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          10
+        ]
+      }
+    ]
+  },
+  {
+    "category": "file_event",
+    "sources": [
+      {
+        "name": "sysmon-11",
+        "label": "Sysmon 11",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          11
+        ]
+      }
+    ]
+  },
+  {
+    "category": "registry_add",
+    "sources": [
+      {
+        "name": "sysmon-12-add",
+        "label": "Sysmon 12",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          12
+        ],
+        "event_type": [
+          "CreateKey"
+        ]
+      }
+    ]
+  },
+  {
+    "category": "registry_delete",
+    "sources": [
+      {
+        "name": "sysmon-12-delete",
+        "label": "Sysmon 12",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          12
+        ],
+        "event_type": [
+          "DeleteKey",
+          "DeleteValue"
+        ]
+      }
+    ]
+  },
+  {
+    "category": "registry_set",
+    "sources": [
+      {
+        "name": "sysmon-13",
+        "label": "Sysmon 13",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          13
+        ],
+        "event_type": [
+          "SetValue"
+        ]
+      }
+    ]
+  },
+  {
+    "category": "registry_event",
+    "sources": [
+      {
+        "name": "sysmon-12-14",
+        "label": "Sysmon 12, 13, 14",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          12,
+          13,
+          14
+        ]
+      }
+    ]
+  },
+  {
+    "category": "pipe_created",
+    "sources": [
+      {
+        "name": "sysmon-17-18",
+        "label": "Sysmon 17, 18",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          17,
+          18
+        ]
+      }
+    ]
+  },
+  {
+    "category": "wmi_event",
+    "sources": [
+      {
+        "name": "sysmon-19-21",
+        "label": "Sysmon 19, 20, 21",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          19,
+          20,
+          21
+        ]
+      }
+    ]
+  },
+  {
+    "category": "dns_query",
+    "sources": [
+      {
+        "name": "sysmon-22",
+        "label": "Sysmon 22",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "event_ids": [
+          22
+        ]
+      }
+    ]
+  },
+  {
+    "category": "ps_module",
+    "sources": [
+      {
+        "name": "powershell-4103",
+        "label": "PowerShell 4103",
+        "channel": "Microsoft-Windows-PowerShell/Operational",
+        "event_ids": [
+          4103
+        ]
+      }
+    ]
+  },
+  {
+    "category": "ps_script",
+    "sources": [
+      {
+        "name": "powershell-4104",
+        "label": "PowerShell 4104",
+        "channel": "Microsoft-Windows-PowerShell/Operational",
+        "event_ids": [
+          4104
+        ]
+      }
+    ]
+  }
+]
