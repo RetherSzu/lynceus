@@ -49,6 +49,7 @@ type Sorter struct {
 	Ctx    context.Context
 	Parent string // dossier où créer le dossier de travail
 	Decode func(line []byte) (Key, error)
+	Budget int // octets gardés en mémoire avant un segment ; 0 = SegmentBudget
 
 	dir  string // dossier de travail, créé au premier segment
 	buf  []entry
@@ -60,7 +61,11 @@ type Sorter struct {
 func (s *Sorter) Add(k Key, line []byte) error {
 	s.buf = append(s.buf, entry{k, line})
 	s.size += len(line) + len(k.S) + len(k.T) + 64
-	if s.size >= SegmentBudget {
+	budget := s.Budget
+	if budget == 0 {
+		budget = SegmentBudget
+	}
+	if s.size >= budget {
 		return s.spill()
 	}
 	return nil

@@ -442,8 +442,11 @@ Detection (spec 003) ─▶ tri externe (timestamp, id) ─▶ detections/detect
 - **Garde 4688 (013)** : Security 4688 est une source partielle de `process_creation` (`Image` ←
   `NewProcessName`, `ParentImage` ← `ParentProcessName`, `CommandLine`, plus les champs communs) ;
   une règle qui cite un autre champ, y compris par `fieldref`, n'y est pas évaluée et la
-  restriction est consignée ; une règle sans source restante est refusée. Sysmon et 4688 décrivant
-  le même lancement donnent deux détections ; leur rapprochement relève de `correlate` (DF-36).
+  restriction est consignée ; une règle sans source restante est refusée.
+- **Rapprochement Sysmon et 4688 (013, DF-36)** : les détections des sources `sysmon-1` et
+  `security-4688` passent par un second tri externe ; deux détections d'une même règle de même
+  hôte, PID, PID parent et image, à 2 s au plus, deviennent une détection portant les deux
+  événements (`detections_merged` dans `case.log`). `correlate` n'a pas à traiter ce doublon.
 - **Champs** : `EventID`, `Channel`, `Provider_Name`, `Computer`, puis les données de l'événement
   conservées par `ingest` (`metadata`) ; jamais un message rendu.
 - **Versions** : `rule_version` = empreinte du fichier de la règle (fins de ligne ramenées à LF) ;

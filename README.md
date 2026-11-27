@@ -344,8 +344,10 @@ faux positifs. Un avertissement le signale, et `case.log` donne le détail par r
 dfirflow: detect: warning: 3 rules not applied to Security 4688 (missing fields), see case.log
 ```
 
-Quand Sysmon et 4688 enregistrent le même lancement, une règle produit deux détections, une par
-événement.
+Quand Sysmon et 4688 enregistrent le même lancement (même hôte, même PID, même processus parent,
+même image, à deux secondes près), une règle qui les satisfait tous deux produit une seule
+détection, qui cite les deux événements ; `case.log` compte ces rapprochements
+(`detections_merged`).
 
 ### Le sous-ensemble Sigma pris en charge
 

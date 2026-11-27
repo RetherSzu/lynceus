@@ -726,7 +726,7 @@ func TestDetectLog(t *testing.T) {
 	if v, _ := sum["ruleset_version"].(string); entry["command"] != "detect" || entry["exit_code"] != 0.0 || sum["rules"] != "embedded" ||
 		len(v) != 16 || len(sum["categories_version"].(string)) != 16 || sum["rules_applied"] != 12.0 || sum["rules_skipped"] != 0.0 || sum["files"] != 1.0 ||
 		sum["events_read"] != 739.0 || sum["detections"] != 15.0 || sum["sha256"] != sha(string(data)) ||
-		sum["rules_refused"] != nil || sum["unknown_files"] != nil || sum["error"] != nil {
+		sum["rules_refused"] != nil || sum["detections_merged"] != nil || sum["unknown_files"] != nil || sum["error"] != nil {
 		t.Fatalf("journal = %v", entry)
 	}
 

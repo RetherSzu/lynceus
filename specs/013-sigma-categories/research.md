@@ -139,6 +139,20 @@ Les modificateurs se lisent de gauche à droite : encodage (`wide`, `utf16le`, `
 - **Raison** : clarification de la spec (réponse B) ; l'avertissement unique signale le problème
   sans noyer la sortie quand un corpus en compte des centaines.
 
+## R9. Rapprochement Sysmon 1 et Security 4688 (ajout du 2026-11-27)
+
+- **Décision** : dans `detect`, après la lecture des événements, les détections candidates
+  (sources `sysmon-1` et `security-4688`) passent par un second tri externe, puis par une fenêtre
+  glissante de 2 secondes qui apparie celles de même règle, hôte, PID, PID parent et image ; le
+  résultat rejoint le tri principal. Clé et appariement : `data-model.md` « Rapprochement ».
+- **Raison** : le doublon est créé par la source 4688 de cette spec ; le corriger ici évite que
+  `correlate` dépende d'un défaut d'une spec antérieure. Les champs normalisés (`process_id` en
+  décimal pour les deux sources) suffisent ; la mémoire reste bornée par le tri externe et par le
+  nombre de candidates dans une fenêtre de 2 secondes.
+- **Alternatives** : laisser le rapprochement à `correlate` (choix initial de Q2, révisé) ;
+  écarter 4688 quand Sysmon est présent sur l'hôte (perd les lancements que Sysmon a manqués) ;
+  rapprocher sur la ligne de commande (vide dans de nombreux 4688).
+
 ## R8. Jeu embarqué et mesure sur SigmaHQ
 
 - **Décision** : cinq règles ajoutées (`data-model.md`), écrites pour DFIRFlow sous Apache-2.0,

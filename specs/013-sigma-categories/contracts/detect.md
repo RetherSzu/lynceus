@@ -47,13 +47,14 @@ Retirées : `logsource category is not supported` ; `missing logsource.service` 
 
 ## `case.log`
 
-Clés ajoutées à l'entrée `detect` : `categories_version`, `rules_restricted`
+Clés ajoutées à l'entrée `detect` : `categories_version`, `rules_restricted`, `detections_merged`
 ([data-model.md](../data-model.md)).
 
 ## Invariants
 
 - Les détections des règles de service sont identiques à celles de la spec 012.
-- Une détection par couple (règle, événement), même si deux événements de sources différentes
-  décrivent la même activité.
+- Une détection par couple (règle, événement), sauf un lancement de processus vu par Sysmon 1 et
+  par Security 4688 et satisfait par la même règle : une seule détection, qui porte les deux
+  événements (FR-005a, data-model.md « Rapprochement »).
 - Pour une même table des catégories, mêmes règles et même cas : fichier identique octet par
   octet.

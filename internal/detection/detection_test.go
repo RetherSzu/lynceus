@@ -337,9 +337,13 @@ func TestRunLarge(t *testing.T) {
 			case n%200 == 0: // 1 % satisfait une règle embarquée : de service...
 				ev = evtx("Security", "Microsoft-Windows-Security-Auditing", 4719, nil, n)
 				wantDet++
-			case n%200 == 100: // ... ou de catégorie
+			case n%200 == 100: // ... ou de catégorie, vue par Sysmon 1 puis par 4688 (rapprochées)
 				ev = proc(n, `C:\Windows\System32\vssadmin.exe`, "vssadmin delete shadows /all")
+				ev.Process, ev.ProcessID, ev.ParentProcessID = `C:\Windows\System32\vssadmin.exe`, uint32(n), 4
 				wantDet++
+			case n%200 == 101:
+				ev = proc4688(n, `C:\Windows\System32\vssadmin.exe`, "vssadmin delete shadows /all")
+				ev.Process, ev.ProcessID, ev.ParentProcessID = `C:\Windows\System32\vssadmin.exe`, uint32(n-1), 4
 			case n%6 == 0:
 				ev = proc(n, `C:\w\a.exe`, "a -x")
 			case n%6 == 1:
@@ -390,7 +394,7 @@ func TestRunLarge(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%d rules: %d events, %d detections in %v, peak heap %d MiB", len(rs.Applied), sum.EventsRead, sum.Detections, elapsed, peak>>20)
-		if sum.EventsRead != total || sum.Detections != wantDet || peak > 256<<20 || elapsed > 5*time.Minute {
+		if sum.EventsRead != total || sum.Detections != wantDet || sum.Merged != wantDet/2 || peak > 256<<20 || elapsed > 5*time.Minute {
 			t.Fatalf("read=%d detections=%d (want %d) peak=%d MiB elapsed=%v", sum.EventsRead, sum.Detections, wantDet, peak>>20, elapsed)
 		}
 		return elapsed
@@ -514,15 +518,39 @@ func TestRunCategories(t *testing.T) {
 
 const sel4624 = "  sel:\n    EventID: 4624\n  condition: sel\n"
 
-// TestRun4688 : un même lancement vu par Sysmon et par 4688 donne deux
-// détections ; la garde n'en laisse qu'une (FR-005a, SC-003).
+// TestRun4688 : un même lancement vu par Sysmon 1 et par 4688 donne une seule
+// détection portant les deux événements ; tout autre couple reste séparé
+// (FR-005a, SC-003, data-model.md « Rapprochement »).
 func TestRun4688(t *testing.T) {
 	c := newCase(t, secLog)
-	evs := []normalizer.Event{
-		evtx(sysmonCh, "Microsoft-Windows-Sysmon", 1, map[string]string{"Image": `C:\w\x.exe`, "ParentImage": `C:\w\p.exe`, "CommandLine": "x -y"}, 1),
-		evtx("Security", "Microsoft-Windows-Security-Auditing", 4688, map[string]string{"NewProcessName": `C:\w\x.exe`, "ParentProcessName": `C:\w\p.exe`, "CommandLine": "x -y"}, 2),
-		evtx("Security", "Microsoft-Windows-Security-Auditing", 4688, map[string]string{"NewProcessName": `C:\w\z.exe`}, 3),
+	launch := func(sysmon bool, i int, pid, ppid uint32, image string, at time.Duration) normalizer.Event {
+		var ev normalizer.Event
+		if sysmon {
+			ev = evtx(sysmonCh, "Microsoft-Windows-Sysmon", 1, map[string]string{"Image": image, "ParentImage": `C:\w\p.exe`, "CommandLine": "x -y"}, i)
+		} else {
+			ev = evtx("Security", "Microsoft-Windows-Security-Auditing", 4688, map[string]string{"NewProcessName": image, "ParentProcessName": `C:\w\p.exe`, "CommandLine": "x -y"}, i)
+		}
+		ev.Process, ev.ProcessID, ev.ParentProcessID = image, pid, ppid
+		ev.Timestamp = normalizer.Time{Time: base.Add(at)}
+		return ev
 	}
+	sec := time.Second
+	evs := []normalizer.Event{
+		launch(true, 1, 100, 10, `C:\w\x.exe`, 0),                      // 0 et 1 : même lancement
+		launch(false, 2, 100, 10, `C:\W\X.EXE`, 1500*time.Millisecond), //
+		launch(true, 3, 200, 10, `C:\w\x.exe`, 10*sec),                 // 3 : PID différent de 4
+		launch(false, 4, 201, 10, `C:\w\x.exe`, 10*sec),                //
+		launch(true, 5, 300, 10, `C:\w\x.exe`, 20*sec),                 // 5 et 6 : PID parent différent
+		launch(false, 6, 300, 11, `C:\w\x.exe`, 20*sec),                //
+		launch(true, 7, 400, 10, `C:\w\x.exe`, 30*sec),                 // 7 et 8 : écart de 3 s
+		launch(false, 8, 400, 10, `C:\w\x.exe`, 33*sec),                //
+		launch(true, 9, 500, 10, `C:\w\x.exe`, 40*sec),                 // 9 et 10 : deux Sysmon
+		launch(true, 10, 500, 10, `C:\w\x.exe`, 40*sec),                //
+		launch(false, 11, 600, 10, `C:\v\x.exe`, 50*sec),               // 10 et 11 : image différente
+		launch(true, 12, 600, 10, `C:\w\x.exe`, 50*sec),                //
+		launch(false, 13, 700, 10, `C:\w\z.exe`, 60*sec),               // 12 : 4688 sans CommandLine
+	}
+	delete(evs[12].Metadata, "CommandLine")
 	writeEvents(t, c, secLog+".jsonl", evs)
 	pc := "  category: process_creation\n"
 	dir := writeRules(t, map[string]string{
@@ -530,19 +558,43 @@ func TestRun4688(t *testing.T) {
 		"hash.yml": withID("hash", catRule(pc, "  sel:\n    Image|endswith: '\\x.exe'\n  filter:\n    Hashes|contains: 'SHA256=AA'\n  condition: sel and not filter\n")),
 		"nocl.yml": withID("nocl", catRule(pc, "  sel:\n    Image|endswith: '\\z.exe'\n  cl:\n    CommandLine|contains: x\n  condition: sel and not cl\n")),
 	})
-	if _, err := Run(context.Background(), c, mustLoad(t, dir)); err != nil {
+	sum, err := Run(context.Background(), c, mustLoad(t, dir))
+	if err != nil {
 		t.Fatal(err)
 	}
-	got := map[string]int{}
-	err := normalizer.ReadDetections(bytes.NewReader(readDetections(t, c)), func(d normalizer.Detection) error {
-		got[d.RuleID+" "+d.Events[0]]++
+	got := map[string]normalizer.Detection{}
+	err = normalizer.ReadDetections(bytes.NewReader(readDetections(t, c)), func(d normalizer.Detection) error {
+		got[d.RuleID+" "+strings.Join(d.Events, ",")] = d
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int{"both " + evs[0].UID: 1, "both " + evs[1].UID: 1, "hash " + evs[0].UID: 1, "nocl " + evs[2].UID: 1}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("detections %v, want %v", got, want)
+	u := func(i int) string { return evs[i].UID }
+	pair := []string{u(0), u(1)}
+	sort.Strings(pair)
+	want := []string{"both " + strings.Join(pair, ",")}
+	for _, i := range []int{2, 3, 4, 5, 6, 7, 8, 9, 10, 11} {
+		want = append(want, "both "+u(i))
+	}
+	for _, i := range []int{0, 2, 4, 6, 8, 9, 11} {
+		want = append(want, "hash "+u(i))
+	}
+	want = append(want, "nocl "+u(12)) // champ absent → sélection fausse, comme en spec 012
+	var keys []string
+	for k := range got {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	sort.Strings(want)
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("detections\n%v\nwant\n%v", keys, want)
+	}
+	m := got["both "+strings.Join(pair, ",")]
+	if m.Timestamp.Time != evs[0].Timestamp.Time || m.ID != normalizer.DetectionID("both", m.RuleVersion, pair) {
+		t.Errorf("merged detection %+v", m)
+	}
+	if sum.Merged != 1 || sum.Detections != len(want) {
+		t.Errorf("summary %+v, want 1 merged and %d detections", sum, len(want))
 	}
 }

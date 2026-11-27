@@ -28,7 +28,9 @@ garanties que la 012 : déterminisme, versions, refus motivés, constitution VI 
   concernées, renvoi à `case.log`), le détail par règle dans `case.log`.
 - Q: Un même lancement de processus enregistré par Sysmon et par 4688 et détecté par une même
   règle donne-t-il une ou deux détections ? → A: deux, une par événement ; le rapprochement des
-  deux enregistrements relève de `correlate` (DF-36).
+  deux enregistrements relève de `correlate` (DF-36). **Révisée le 2026-11-27** : une seule
+  détection portant les deux événements ; le doublon naît de la source 4688 ajoutée par cette
+  spec, il est donc corrigé ici et `correlate` n'en dépend pas (DF-36 sort de son périmètre).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -83,7 +85,8 @@ sur la plupart des machines examinées ; et sans la garde, une règle du type «
 signé par Y » détecterait à tort tous les processus X, faute de champ de signature dans 4688.
 
 **Independent Test**: sur un cas contenant un événement 4688 et un événement Sysmon équivalents,
-appliquer une règle portant sur l'image et la ligne de commande (deux détections), puis une règle
+appliquer une règle portant sur l'image et la ligne de commande (une détection portant les deux
+événements), puis une règle
 qui exclut un champ absent de 4688 (une seule détection, sur l'événement Sysmon).
 
 **Acceptance Scenarios**:
@@ -175,7 +178,9 @@ négatif de chaque nouvelle règle, et vérifier exactement une détection par c
 - **Règle `process_creation` restreinte à Sysmon par la garde, sur un cas sans Sysmon** : aucune
   détection ; l'entrée `case.log` montre la restriction.
 - **Même lancement de processus enregistré par Sysmon et par 4688** : une règle qui les satisfait
-  tous deux produit deux détections, une par événement ; `detect` ne les rapproche pas.
+  tous deux produit une seule détection, qui porte les deux événements (FR-005a). Deux lancements
+  distincts (PID, PID parent ou image différents, ou horodatages à plus de 2 secondes) restent
+  deux détections.
 - **Règle qui teste l'`EventID` explicitement** avec une catégorie : la condition est évaluée
   telle quelle ; un test `EventID: 1` ne peut donc pas être satisfait par un événement 4688.
 - **`fieldref` vers un champ absent** : la condition est fausse. Avec la garde 4688, le champ
@@ -220,9 +225,12 @@ négatif de chaque nouvelle règle, et vérifier exactement une détection par c
   depuis `NewProcessName`, `ParentImage` depuis `ParentProcessName`, `CommandLine` depuis
   `CommandLine`). Un champ ne MUST être renommé que si sa signification et son format sont
   équivalents à ceux de la source de référence.
-- **FR-005a**: Un événement qui satisfait une règle MUST produire sa propre détection, même si un
-  autre événement d'une autre source décrit la même activité (Sysmon et 4688) ; `detect` MUST NOT
-  rapprocher ces événements.
+- **FR-005a**: Quand une même règle est satisfaite par un événement Sysmon 1 et par un événement
+  Security 4688 du même lancement de processus (même hôte, même PID, même PID parent, même image
+  sans tenir compte de la casse, horodatages à 2 secondes au plus l'un de l'autre), `detect` MUST
+  produire une seule détection portant les deux événements, à l'horodatage du plus ancien. Tout
+  autre couple (règle, événement) MUST produire sa propre détection. Le nombre de rapprochements
+  MUST être consigné dans `case.log`.
 - **FR-006**: Une source MAY être déclarée **partielle** par la table, avec la liste des champs
   qu'elle fournit. Une règle qui cite un champ hors de cette liste (y compris par `fieldref`)
   MUST NOT être évaluée sur cette source ; elle reste évaluée sur les autres sources de sa
@@ -342,8 +350,9 @@ négatif de chaque nouvelle règle, et vérifier exactement une détection par c
 - Les règles ajoutées au jeu embarqué sont écrites pour DFIRFlow sous licence Apache-2.0.
 - Les tests reposent sur des événements normalisés synthétiques de Sysmon et de 4688 ; le dépôt
   ne contient pas de journal Sysmon de référence sous licence compatible.
-- La corrélation (seuils, fenêtres de temps, DF-36) reste hors périmètre, comme en spec 012 ; elle
-  comprend le rapprochement d'un même lancement de processus enregistré par Sysmon et par 4688.
+- La corrélation (seuils, fenêtres de temps) reste hors périmètre, comme en spec 012. Le
+  rapprochement d'un même lancement enregistré par Sysmon et par 4688 (DF-36) est traité ici
+  (FR-005a), puisque le doublon vient de cette spec.
 - Les catégories rares (`clipboard_capture`, `raw_access_thread`, `sysmon_status`, `registry_rename`,
   `file_delete`…) et les sources autres que Sysmon, PowerShell et 4688 pour une catégorie
   (par exemple les journaux de pare-feu pour `network_connection`) sont des évolutions

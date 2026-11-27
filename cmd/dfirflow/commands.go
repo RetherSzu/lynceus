@@ -543,6 +543,9 @@ func detectCmd(ctx context.Context, o *opts) (err error) {
 		if sum.Files > 0 || sum.EventsRead > 0 {
 			summary["files"], summary["events_read"], summary["detections"] = sum.Files, sum.EventsRead, sum.Detections
 		}
+		if sum.Merged > 0 {
+			summary["detections_merged"] = sum.Merged
+		}
 		if sum.SHA256 != "" {
 			summary["sha256"] = sum.SHA256
 		}

@@ -101,6 +101,16 @@ invalide, une valeur `exists` non booléenne ou multiple, une cible `fieldref` v
 Modificateurs toujours refusés : `expand`, `gt`, `gte`, `lt`, `lte`, `minute`, `hour`, `day`,
 `week`, `month`, `year`, `utf16`, options `m` et `s` de `re`, tout nom inconnu.
 
+## Rapprochement Sysmon 1 et Security 4688 (FR-005a, research R9)
+
+Candidates : détections produites par les sources `sysmon-1` et `security-4688` d'un événement
+dont `process_id` est renseigné. Clé : règle (`id`), `host`, `process_id`, `parent_process_id`,
+`process` en minuscules (champs normalisés par `ingest`, PID déjà convertis en décimal). Dans
+l'ordre (horodatage, id), une candidate s'apparie à la plus ancienne candidate non appariée de
+même clé et de l'autre source, si leurs horodatages sont à 2 secondes au plus ; la détection
+fusionnée porte les deux `uid` triés, l'horodatage du plus ancien, et son `id` est recalculé sur
+les deux événements. Une candidate sans partenaire est écrite telle quelle.
+
 ## Jeu embarqué (ajouts)
 
 | Fichier | Titre | Catégorie | Sélection | Niveau, statut | ATT&CK |
@@ -132,5 +142,6 @@ référence, toujours 15 détections (SC-006).
 |---|---|
 | `categories_version` | version de la table des catégories (toujours présente dès que le jeu de règles est chargé) |
 | `rules_restricted` | liste triée par fichier puis source de `{file, source, missing}` (`missing` : champs triés) ; omise si vide |
+| `detections_merged` | nombre de détections Sysmon 1 et Security 4688 rapprochées (FR-005a) ; omise si nul ; `detections` compte les détections écrites |
 
 La ligne de résumé et les autres clés sont inchangées.
