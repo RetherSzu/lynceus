@@ -36,8 +36,14 @@ func init() {
 	if categories, err = loadCategories(categoriesJSON); err != nil {
 		panic("detection: categories.json: " + err.Error()) // bogue de construction, couvert par TestCategoriesTable
 	}
-	sum := sha256.Sum256(categoriesJSON)
-	CategoriesVersion = hex.EncodeToString(sum[:8])
+	CategoriesVersion = categoriesVersion(categoriesJSON)
+}
+
+// categoriesVersion est l'empreinte de la table, fins de ligne ramenées à LF
+// pour qu'une extraction Windows (CRLF) donne la même version (research R1).
+func categoriesVersion(data []byte) string {
+	sum := sha256.Sum256(bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n")))
+	return hex.EncodeToString(sum[:8])
 }
 
 func loadCategories(data []byte) (map[string][]*Source, error) {

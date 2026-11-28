@@ -41,13 +41,14 @@ func TestCategoriesTable(t *testing.T) {
 	if d := cats["registry_delete"][0]; !d.EventType["deletekey"] || !d.EventType["deletevalue"] || len(d.EventType) != 2 {
 		t.Errorf("registry_delete: %+v", d)
 	}
-	sum := sha256.Sum256(categoriesJSON)
-	if CategoriesVersion != hex.EncodeToString(sum[:8]) {
-		t.Errorf("version %s", CategoriesVersion)
+	src := strings.ReplaceAll(string(categoriesJSON), "\r\n", "\n") // extraction Windows
+	sum := sha256.Sum256([]byte(src))
+	if CategoriesVersion != hex.EncodeToString(sum[:8]) ||
+		categoriesVersion([]byte(strings.ReplaceAll(src, "\n", "\r\n"))) != CategoriesVersion {
+		t.Errorf("version %s depends on line endings", CategoriesVersion)
 	}
 
 	// Tables invalides : rejetées avec une cause.
-	src := string(categoriesJSON)
 	for name, bad := range map[string]string{
 		"duplicate category": strings.Replace(src, `"category": "driver_load"`, `"category": "image_load"`, 1),
 		"duplicate source":   strings.Replace(src, `"name": "sysmon-6"`, `"name": "sysmon-7"`, 1),
